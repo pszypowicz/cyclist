@@ -1,0 +1,178 @@
+import AppKit
+
+// State machine for a switcher session: Cmd+Tab starts an app session,
+// Cmd+` starts a window session for the frontmost app. While Cmd is held,
+// Tab/backtick advance (Shift reverses), Esc cancels, and releasing Cmd
+// commits the current selection.
+final class SwitcherController {
+    private let tap = EventTap()
+    private let mru: MRUTracker
+    private let panel = SwitcherPanel()
+
+    private enum Session {
+        case apps([AppItem], index: Int)
+        case windows(NSRunningApplication, [WindowItem], index: Int)
+    }
+    private var session: Session?
+    private var showPanelWork: DispatchWorkItem?
+
+    private let tabKey: Int64 = 48
+    private let graveKey: Int64 = 50
+    private let escapeKey: Int64 = 53
+
+    init(mru: MRUTracker) {
+        self.mru = mru
+        tap.onKeyDown = { [weak self] event in
+            self?.handleKeyDown(event) ?? false
+        }
+        tap.onFlagsChanged = { [weak self] event in
+            self?.handleFlagsChanged(event)
+        }
+    }
+
+    func start() -> Bool {
+        tap.start()
+    }
+
+    private func handleKeyDown(_ event: CGEvent) -> Bool {
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        let flags = event.flags
+        let command = flags.contains(.maskCommand)
+        let backward = flags.contains(.maskShift)
+        let otherModifiers = flags.contains(.maskControl) || flags.contains(.maskAlternate)
+
+        switch keyCode {
+        case tabKey where command && !otherModifiers:
+            advanceApps(backward: backward)
+            return true
+        case graveKey where command && !otherModifiers:
+            advanceWindows(backward: backward)
+            return true
+        case escapeKey where session != nil:
+            cancel()
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func handleFlagsChanged(_ event: CGEvent) {
+        guard session != nil else { return }
+        if !event.flags.contains(.maskCommand) {
+            commit()
+        }
+    }
+
+    private func advanceApps(backward: Bool) {
+        switch session {
+        case .apps(let items, let index):
+            let next = step(index, count: items.count, backward: backward)
+            session = .apps(items, index: next)
+            panel.select(index: next)
+        case .windows:
+            break
+        case nil:
+            let items = AppListProvider.snapshot(mru: mru)
+            guard !items.isEmpty else { return }
+            let start = startIndex(count: items.count, backward: backward)
+            session = .apps(items, index: start)
+            presentPanel(
+                rows: items.map { SwitcherRow(title: $0.name, annotation: annotation(for: $0.state)) },
+                selected: start
+            )
+        }
+    }
+
+    private func advanceWindows(backward: Bool) {
+        switch session {
+        case .windows(let app, let items, let index):
+            let next = step(index, count: items.count, backward: backward)
+            session = .windows(app, items, index: next)
+            panel.select(index: next)
+        case .apps:
+            break
+        case nil:
+            guard let app = NSWorkspace.shared.frontmostApplication else { return }
+            let items = WindowListProvider.snapshot(for: app)
+            guard !items.isEmpty else { return }
+            let start = startIndex(count: items.count, backward: backward)
+            session = .windows(app, items, index: start)
+            presentPanel(
+                rows: items.map { SwitcherRow(title: $0.title, annotation: $0.isMinimized ? "minimized" : nil) },
+                selected: start
+            )
+        }
+    }
+
+    private func startIndex(count: Int, backward: Bool) -> Int {
+        guard count > 1 else { return 0 }
+        return backward ? count - 1 : 1
+    }
+
+    private func step(_ index: Int, count: Int, backward: Bool) -> Int {
+        guard count > 0 else { return 0 }
+        return (index + (backward ? count - 1 : 1)) % count
+    }
+
+    private func annotation(for state: AppState) -> String? {
+        switch state {
+        case .normal: return nil
+        case .hidden: return "hidden"
+        case .minimized: return "minimized"
+        case .otherSpace: return "other space"
+        }
+    }
+
+    // Delay showing the panel slightly so a quick Cmd+Tab tap switches to the
+    // previous app without a visual flash.
+    private func presentPanel(rows: [SwitcherRow], selected: Int) {
+        panel.setRows(rows, selected: selected)
+        let work = DispatchWorkItem { [weak self] in self?.panel.show() }
+        showPanelWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+    }
+
+    private func dismissPanel() {
+        showPanelWork?.cancel()
+        showPanelWork = nil
+        panel.hide()
+    }
+
+    private func cancel() {
+        session = nil
+        dismissPanel()
+    }
+
+    private func commit() {
+        guard let session else { return }
+        self.session = nil
+        dismissPanel()
+        switch session {
+        case .apps(let items, let index):
+            activate(items[index])
+        case .windows(let app, let items, let index):
+            focus(items[index], of: app)
+        }
+    }
+
+    private func activate(_ item: AppItem) {
+        let app = item.app
+        if app.isHidden {
+            app.unhide()
+        }
+        if item.state == .minimized,
+           let window = AX.windows(pid: app.processIdentifier)
+               .first(where: { AX.bool($0, kAXMinimizedAttribute) == true }) {
+            AX.setBool(window, kAXMinimizedAttribute, false)
+        }
+        app.activate(options: [.activateIgnoringOtherApps])
+    }
+
+    private func focus(_ item: WindowItem, of app: NSRunningApplication) {
+        if item.isMinimized {
+            AX.setBool(item.element, kAXMinimizedAttribute, false)
+        }
+        AX.raise(item.element)
+        app.activate(options: [.activateIgnoringOtherApps])
+    }
+}
