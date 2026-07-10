@@ -18,7 +18,7 @@ struct SwitcherView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView(.vertical) {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(model.rows.enumerated()), id: \.offset) { index, row in
                         HStack {
