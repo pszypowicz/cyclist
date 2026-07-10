@@ -42,7 +42,7 @@ enum AppListProvider {
     }
 
     static func snapshot(mru: MRUTracker) -> [ListEntry] {
-        let cgWindows = cgWindowIDs()
+        let (cgWindows, cgTitles) = cgWindowInventory()
         let otherSpaceWindows = Spaces.windowsByNonVisibleSpace()
             .sorted { $0.key < $1.key }
 
@@ -88,22 +88,27 @@ enum AppListProvider {
 
             // One row per existing non-visible Space that actually contains
             // a window of this app.
+            // One row per real window in each non-visible Space. Titles come
+            // from CGWindowList when Screen Recording permission is granted
+            // (used solely for titles, never captures), else from the cache
+            // of titles seen while the window was visible.
             let appWindowIDs = cgWindows[app.processIdentifier] ?? []
             for (space, windowIDs) in otherSpaceWindows {
                 let candidates = appWindowIDs.filter { windowIDs.contains($0) }
                 guard !candidates.isEmpty else { continue }
                 hasAnyWindow = true
                 guard Settings.includeOtherSpaces else { continue }
-                let windowID = candidates.first { titleCache[$0] != nil } ?? candidates[0]
-                appEntries.append(ListEntry(
-                    app: app,
-                    appName: name,
-                    windowTitle: titleCache[windowID],
-                    state: .otherSpace,
-                    axWindow: nil,
-                    spaceID: space,
-                    windowID: windowID
-                ))
+                for windowID in candidates {
+                    appEntries.append(ListEntry(
+                        app: app,
+                        appName: name,
+                        windowTitle: cgTitles[windowID] ?? titleCache[windowID],
+                        state: .otherSpace,
+                        axWindow: nil,
+                        spaceID: space,
+                        windowID: windowID
+                    ))
+                }
             }
 
             if !hasAnyWindow && Settings.includeNoWindows {
@@ -122,12 +127,13 @@ enum AppListProvider {
         return entries
     }
 
-    private static func cgWindowIDs() -> [pid_t: [Int]] {
+    private static func cgWindowInventory() -> (ids: [pid_t: [Int]], titles: [Int: String]) {
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            return [:]
+            return ([:], [:])
         }
         var ids: [pid_t: [Int]] = [:]
+        var titles: [Int: String] = [:]
         for info in list {
             // Layer 0 alone is not enough: apps keep invisible bookkeeping
             // windows there (menu bar sized strips, cached Electron shells,
@@ -141,7 +147,11 @@ enum AppListProvider {
                   let windowID = info[kCGWindowNumber as String] as? Int,
                   let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
             ids[pid, default: []].append(windowID)
+            // Populated only when Screen Recording permission is granted.
+            if let name = info[kCGWindowName as String] as? String, !name.isEmpty {
+                titles[windowID] = name
+            }
         }
-        return ids
+        return (ids, titles)
     }
 }

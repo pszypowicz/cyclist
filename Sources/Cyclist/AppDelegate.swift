@@ -13,6 +13,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller = SwitcherController(mru: mru)
         statusItem.setUp()
         ensurePermissionAndStart()
+        // Optional: unlocks live titles for windows in other Spaces via
+        // CGWindowList. Used solely to read titles; Cyclist never captures
+        // window contents. Without it, last-seen titles are used instead.
+        if !CGPreflightScreenCaptureAccess() {
+            CGRequestScreenCaptureAccess()
+        }
     }
 
     private func ensurePermissionAndStart() {

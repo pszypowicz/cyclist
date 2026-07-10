@@ -7,7 +7,7 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 ## What it does
 
 - Replaces the native Cmd+Tab switcher with a vertical, text-only list in most-recently-used app order. Every window gets its own row (`App - Window title`), so two Safari windows are two entries.
-- Windows in other Spaces (including native fullscreen) appear as one row per Space. macOS reveals their live titles only to apps holding Screen Recording permission, which Cyclist deliberately never requests; instead, each row shows the last title Cyclist saw while that window was visible (so it appears after you have summoned the switcher on that Space once, and can lag a rename that happens while the window is away). Selecting the row jumps straight to that Space.
+- Windows in other Spaces (including native fullscreen) get their own rows too. With Screen Recording permission granted their titles are live; without it, each row shows the last title Cyclist saw while that window was visible. Selecting a row jumps straight to that Space.
 - A separate binding (Cmd+`) cycles through the windows of the frontmost app, including minimized ones - something the native window cycler skips.
 - Four independent settings control what shows up in the list:
   - include **hidden** apps (Cmd+H)
@@ -32,7 +32,7 @@ Shortcuts are hardcoded in this release and use physical key positions (Tab and 
 
 - macOS 13 or later
 - **Accessibility** permission (System Settings > Privacy & Security > Accessibility) - required for the global Cmd+Tab hook and for reading window state
-- No Screen Recording permission needed - staying text-only means Cyclist never reads window contents, and keeping it that way is a design goal
+- **Screen Recording** permission, optional but recommended - macOS gates the titles of windows in other Spaces behind it. Cyclist uses it solely to read those titles and never captures window contents; there are no thumbnails or screenshots anywhere in the UI. Without it, other-Space rows show the last title Cyclist saw while the window was visible
 
 ## Build and install
 
