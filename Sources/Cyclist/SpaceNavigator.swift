@@ -1,28 +1,33 @@
 import AppKit
 
-// Walks to a target Space one Mission Control arrow press at a time.
+// Walks to a target Space one hop at a time, choosing the fastest native
+// mechanism per hop:
 //
-// Mission Control drops any arrow press that arrives while its transition
-// animation is still running - physical ones too: holding Ctrl and pressing
-// the arrow twice quickly also lands one Space short, and a press that gets
-// through mid-animation has its transition rolled back. Steps are therefore
-// paced to the animation duration, and each step recomputes the remaining
-// distance from the real Space state before pressing, so nothing is fired
-// blind and outside interference (or a dropped press) degrades gracefully.
+// - Synthetic dock-swipe: instant (~40ms, no animation). The Dock refuses
+//   it between two fullscreen Spaces, so those hops are predicted from the
+//   Space types and use the arrow shortcut directly.
+// - Mission Control arrow shortcut: animated (~1s), universally accepted,
+//   but drops any press that arrives during a running animation - physical
+//   presses included - so arrow hops are paced to the animation duration.
 //
-// activeSpaceDidChangeNotification is deliberately NOT used: it fires while
-// the transition is in flight, when the reported current Space is garbage
-// (it can read as an unrelated Space entirely), which once faked an arrival
-// and stranded the navigation mid-route. Only reads taken a full step
-// interval after a press proved trustworthy.
+// Each step recomputes the remaining distance from the real Space state
+// before acting, so nothing is fired blind; a hop that makes no progress
+// falls back to the arrow, and three stalled steps abort the walk (covers
+// the Mission Control shortcuts being disabled). On verified arrival the
+// target window is made key.
+//
+// activeSpaceDidChangeNotification is deliberately not used: it fires while
+// a transition is in flight, when the reported current Space can be garbage
+// (it once read as an unrelated Space and faked an arrival mid-route).
 final class SpaceNavigator {
-    // Just above the observed transition animation time; presses spaced
-    // closer than ~1s get dropped.
-    private let stepInterval: TimeInterval = 1.25
+    private let swipeInterval: TimeInterval = 0.35
+    private let arrowInterval: TimeInterval = 1.25
 
     private var target: UInt64?
     private var focus: (pid: pid_t, windowID: Int)?
     private var stepWork: DispatchWorkItem?
+    private var lastCurrent: UInt64?
+    private var stalls = 0
 
     // Returns false when no display's Space order contains the target.
     func begin(to spaceID: UInt64, focusPid: pid_t, windowID: Int?) -> Bool {
@@ -39,13 +44,15 @@ final class SpaceNavigator {
         stepWork = nil
         target = nil
         focus = nil
+        lastCurrent = nil
+        stalls = 0
     }
 
     private func step() {
         guard let target else { return }
-        guard let (order, current) = Spaces.orderInfo(containing: target),
-              let targetIndex = order.firstIndex(of: target),
-              let currentIndex = order.firstIndex(of: current) else {
+        guard let info = Spaces.orderInfo(containing: target),
+              let targetIndex = info.order.firstIndex(of: target),
+              let currentIndex = info.order.firstIndex(of: info.current) else {
             cancel()
             return
         }
@@ -57,10 +64,35 @@ final class SpaceNavigator {
             cancel()
             return
         }
-        Log.write("navigator step: current=\(current) target=\(target)")
-        Spaces.postCtrlArrow(right: targetIndex > currentIndex)
+
+        let noProgress = lastCurrent == info.current
+        if noProgress {
+            stalls += 1
+            if stalls >= 3 {
+                Log.write("navigator gave up: stalled at space=\(info.current) target=\(target)")
+                cancel()
+                return
+            }
+        } else {
+            stalls = 0
+        }
+        lastCurrent = info.current
+
+        let right = targetIndex > currentIndex
+        let next = info.order[currentIndex + (right ? 1 : -1)]
+        let fullscreenToFullscreen = info.types[info.current] == Spaces.fullscreenSpaceType
+            && info.types[next] == Spaces.fullscreenSpaceType
+        let useArrow = fullscreenToFullscreen || noProgress
+
+        Log.write("navigator step (\(useArrow ? "arrow" : "swipe")): \(info.current) -> \(next)")
+        if useArrow {
+            Spaces.postCtrlArrow(right: right)
+        } else {
+            Spaces.postDockSwipe(right: right)
+        }
         let work = DispatchWorkItem { [weak self] in self?.step() }
         stepWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + stepInterval, execute: work)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + (useArrow ? arrowInterval : swipeInterval), execute: work)
     }
 }

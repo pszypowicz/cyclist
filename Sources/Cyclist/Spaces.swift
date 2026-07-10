@@ -120,9 +120,12 @@ enum Spaces {
     // keeps compositing underneath the new one, and once desynchronized even
     // native transitions stop working until the WindowServer state resets.
 
-    // Space order and current Space of the display containing the given
-    // Space, for step-by-step navigation.
-    static func orderInfo(containing spaceID: UInt64) -> (order: [UInt64], current: UInt64)? {
+    static let fullscreenSpaceType = 4
+
+    // Space order, per-Space types, and current Space of the display
+    // containing the given Space, for step-by-step navigation.
+    static func orderInfo(containing spaceID: UInt64)
+        -> (order: [UInt64], types: [UInt64: Int], current: UInt64)? {
         guard let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID())?
             .takeRetainedValue() as? [[String: Any]] else { return nil }
         for display in displays {
@@ -130,11 +133,46 @@ enum Spaces {
                   let current = (display["Current Space"] as? [String: Any])?["id64"] as? UInt64
             else { continue }
             let ids = spaces.compactMap { $0["id64"] as? UInt64 }
-            if ids.contains(spaceID) {
-                return (ids, current)
+            guard ids.contains(spaceID) else { continue }
+            var types: [UInt64: Int] = [:]
+            for space in spaces {
+                if let id = space["id64"] as? UInt64, let type = space["type"] as? Int {
+                    types[id] = type
+                }
             }
+            return (ids, types, current)
         }
         return nil
+    }
+
+    // Instant Space switch: a synthetic trackpad dock-swipe with high
+    // velocity, the technique behind InstantSpaceSwitcher, iss, and
+    // Spaceman. The Dock treats it as a completed swipe and switches with
+    // no animation (~40ms observed). Uses undocumented CGEvent field
+    // indices, posted through the public CGEventPost. macOS refuses these
+    // between two fullscreen Spaces, so the navigator falls back to the
+    // arrow shortcut for those hops.
+    static func postDockSwipe(right: Bool) {
+        let eventTypeField = CGEventField(rawValue: 55)!    // real CGS event type
+        let gestureHIDTypeField = CGEventField(rawValue: 110)!
+        let swipeMotionField = CGEventField(rawValue: 123)!
+        let swipeProgressField = CGEventField(rawValue: 124)!
+        let swipeVelocityXField = CGEventField(rawValue: 129)!
+        let swipeVelocityYField = CGEventField(rawValue: 130)!
+        let gesturePhaseField = CGEventField(rawValue: 132)!
+        let progress = right ? Double(Float.leastNonzeroMagnitude) : -Double(Float.leastNonzeroMagnitude)
+        let velocity = right ? 2000.0 : -2000.0
+        for phase: Int64 in [1, 2, 4] {  // began, changed, ended
+            guard let event = CGEvent(source: nil) else { continue }
+            event.setIntegerValueField(eventTypeField, value: 30)   // DockControl
+            event.setIntegerValueField(gestureHIDTypeField, value: 23)  // dock swipe
+            event.setIntegerValueField(gesturePhaseField, value: phase)
+            event.setDoubleValueField(swipeProgressField, value: progress)
+            event.setIntegerValueField(swipeMotionField, value: 1)  // horizontal
+            event.setDoubleValueField(swipeVelocityXField, value: velocity)
+            event.setDoubleValueField(swipeVelocityYField, value: velocity)
+            event.post(tap: .cgSessionEventTap)
+        }
     }
 
     // One press of the Mission Control "Move left/right a space" shortcut.
