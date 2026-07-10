@@ -17,16 +17,17 @@ final class SpaceNavigator {
     private let maxAttempts = 3
 
     private var target: UInt64?
-    private var focus: (pid: pid_t, windowID: Int)?
+    private var onArrival: (() -> Void)?
     private var stepWork: DispatchWorkItem?
     private var attempts = 0
 
     // Returns false when no display's Space order contains the target.
-    func begin(to spaceID: UInt64, focusPid: pid_t, windowID: Int?) -> Bool {
+    // `onArrival` runs once, after the Space change is verified.
+    func begin(to spaceID: UInt64, onArrival: (() -> Void)? = nil) -> Bool {
         guard Spaces.orderInfo(containing: spaceID) != nil else { return false }
         cancel()
         target = spaceID
-        focus = windowID.map { (focusPid, $0) }
+        self.onArrival = onArrival
         step()
         return true
     }
@@ -35,7 +36,7 @@ final class SpaceNavigator {
         stepWork?.cancel()
         stepWork = nil
         target = nil
-        focus = nil
+        onArrival = nil
         attempts = 0
     }
 
@@ -49,10 +50,9 @@ final class SpaceNavigator {
         }
         if targetIndex == currentIndex {
             Log.write("navigator arrived: space=\(target)")
-            if let focus {
-                Spaces.makeKey(pid: focus.pid, windowID: focus.windowID)
-            }
+            let arrival = onArrival
             cancel()
+            arrival?()
             return
         }
 

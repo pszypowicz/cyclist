@@ -1,7 +1,18 @@
 import AppKit
 
-// Session-level CGEventTap for keyDown and flagsChanged. This is what lets
-// Cyclist swallow Cmd+Tab before the Dock's native switcher sees it.
+// Session-level CGEventTaps. Two separate taps:
+//
+// - Keys (keyDown + flagsChanged), an active tap that can consume events.
+//   This is what lets Cyclist swallow Cmd+Tab before the Dock's native
+//   switcher sees it, and Ctrl+Arrows before Mission Control.
+// - Gestures (raw CGS gesture events, for the 3-finger swipe), a separate
+//   LISTEN-ONLY tap: gesture events stream at input-device rate during any
+//   touch, and a listen-only tap observes without delaying delivery - so
+//   even a slow moment in touch processing can never stall the key tap and
+//   make hotkeys "stop working".
+//
+// The system disables taps whose callback stalls; both re-enable themselves
+// and log when that happens.
 final class EventTap {
     // Raw CGS gesture events (trackpad touches) are not in the public
     // CGEventType enum.
@@ -12,40 +23,61 @@ final class EventTap {
     var onFlagsChanged: ((CGEvent) -> Void)?
     var onGesture: ((CGEvent) -> Void)?
 
-    private var tap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
+    private var keyTap: CFMachPort?
+    private var gestureTap: CFMachPort?
 
     func start() -> Bool {
-        guard tap == nil else { return true }
-        let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
-            | (1 << Self.gestureEventType)
-        guard let tap = CGEvent.tapCreate(
+        guard keyTap == nil else { return true }
+
+        let keyMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
+        guard let keys = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
-            eventsOfInterest: CGEventMask(mask),
+            eventsOfInterest: CGEventMask(keyMask),
             callback: { _, type, event, refcon in
-                let eventTap = Unmanaged<EventTap>.fromOpaque(refcon!).takeUnretainedValue()
-                return eventTap.handle(type: type, event: event)
+                let tap = Unmanaged<EventTap>.fromOpaque(refcon!).takeUnretainedValue()
+                return tap.handleKey(type: type, event: event)
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
             return false
         }
-        self.tap = tap
-        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
+        keyTap = keys
+        add(tap: keys)
+
+        let gestureMask = CGEventMask(1) << Self.gestureEventType
+        if let gestures = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: gestureMask,
+            callback: { _, type, event, refcon in
+                let tap = Unmanaged<EventTap>.fromOpaque(refcon!).takeUnretainedValue()
+                return tap.handleGesture(type: type, event: event)
+            },
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) {
+            gestureTap = gestures
+            add(tap: gestures)
+        } else {
+            Log.write("event tap: gesture tap creation failed; 3-finger swipe disabled")
+        }
         return true
     }
 
-    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+    private func add(tap: CFMachPort) {
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
+
+    private func handleKey(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            // The system disables taps whose callback stalls; re-arm or the
-            // switcher silently dies.
-            if let tap {
-                CGEvent.tapEnable(tap: tap, enable: true)
+            Log.write("event tap: key tap disabled (\(type.rawValue)), re-enabling")
+            if let keyTap {
+                CGEvent.tapEnable(tap: keyTap, enable: true)
             }
             return Unmanaged.passUnretained(event)
         case .keyDown:
@@ -57,10 +89,22 @@ final class EventTap {
             onFlagsChanged?(event)
             return Unmanaged.passUnretained(event)
         default:
+            return Unmanaged.passUnretained(event)
+        }
+    }
+
+    private func handleGesture(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            Log.write("event tap: gesture tap disabled (\(type.rawValue)), re-enabling")
+            if let gestureTap {
+                CGEvent.tapEnable(tap: gestureTap, enable: true)
+            }
+        default:
             if type.rawValue == Self.gestureEventType {
                 onGesture?(event)
             }
-            return Unmanaged.passUnretained(event)
         }
+        return Unmanaged.passUnretained(event)
     }
 }

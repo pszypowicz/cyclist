@@ -215,8 +215,12 @@ final class SwitcherController {
         // an advisory request the system ignores from here, so it cannot
         // move activation (or the menu bar) by itself.
         if entry.state == .otherSpace {
+            let pid = app.processIdentifier
+            let windowID = entry.windowID
             if let spaceID = entry.spaceID,
-               navigator.begin(to: spaceID, focusPid: app.processIdentifier, windowID: entry.windowID) {
+               navigator.begin(to: spaceID, onArrival: windowID.map { wid in
+                   { Spaces.makeKey(pid: pid, windowID: wid) }
+               }) {
                 Log.write("navigate: \(entry.appName) space=\(spaceID)")
                 return
             }
@@ -240,7 +244,10 @@ final class SwitcherController {
             for (space, windowIDs) in Spaces.windowsByNonVisibleSpace()
             where windowIDs.contains(windowID) {
                 Log.write("activate: window \(windowID) is actually in space \(space), navigating")
-                _ = navigator.begin(to: space, focusPid: app.processIdentifier, windowID: windowID)
+                let pid = app.processIdentifier
+                _ = navigator.begin(to: space) {
+                    Spaces.makeKey(pid: pid, windowID: windowID)
+                }
                 return
             }
         }

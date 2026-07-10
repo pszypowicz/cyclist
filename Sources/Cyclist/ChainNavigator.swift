@@ -27,12 +27,32 @@ final class ChainNavigator {
     }
 
     func navigate(left: Bool) {
-        guard let display = Spaces.mainDisplayInfo() else { return }
+        guard let display = Spaces.mainDisplayInfo() else {
+            Log.write("chain: no display info")
+            return
+        }
         let chain = buildChain(display: display)
-        guard let index = currentIndex(in: chain, display: display) else { return }
+        guard let index = currentIndex(in: chain, display: display) else {
+            Log.write("chain: current position not in chain \(describe(chain)) current=\(display.current)")
+            return
+        }
         let targetIndex = index + (left ? -1 : 1)
-        guard chain.indices.contains(targetIndex) else { return }
+        guard chain.indices.contains(targetIndex) else {
+            Log.write("chain: at \(left ? "left" : "right") edge, index=\(index) of \(describe(chain))")
+            return
+        }
+        Log.write("chain: \(left ? "left" : "right") from index \(index) in \(describe(chain))")
         go(to: chain[targetIndex], display: display)
+    }
+
+    private func describe(_ chain: [Entry]) -> String {
+        "[" + chain.map { entry in
+            switch entry {
+            case .workspace(let id, let windowID, _): return "ws\(id)(\(windowID.map(String.init) ?? "empty"))"
+            case .anchor(let spaceID): return "anchor\(spaceID)"
+            case .fullscreen(let spaceID): return "fs\(spaceID)"
+            }
+        }.joined(separator: ",") + "]"
     }
 
     private func userSpace(in display: (order: [UInt64], types: [UInt64: Int], current: UInt64)) -> UInt64? {
@@ -110,21 +130,29 @@ final class ChainNavigator {
         switch entry {
         case .fullscreen(let spaceID), .anchor(let spaceID):
             Log.write("chain: goto space \(spaceID)")
-            _ = navigator.begin(to: spaceID, focusPid: 0, windowID: nil)
+            _ = navigator.begin(to: spaceID)
         case .workspace(let id, let windowID, let pid):
             let inFullscreen = display.types[display.current] == Spaces.fullscreenSpaceType
+            let focusEntry: () -> Void
             if let windowID, let pid {
-                if inFullscreen, let userSpaceID = userSpace(in: display) {
-                    Log.write("chain: leave fullscreen, focus workspace \(id) window \(windowID)")
-                    _ = navigator.begin(to: userSpaceID, focusPid: pid, windowID: windowID)
-                } else {
+                focusEntry = {
                     Log.write("chain: focus workspace \(id) window \(windowID)")
                     Spaces.makeKey(pid: pid, windowID: windowID)
                 }
-            } else if !inFullscreen {
-                // Empty workspace: nothing to focus, let AeroSpace switch.
-                Log.write("chain: switch to empty workspace \(id)")
-                _ = Aerospace.run(["workspace", id])
+            } else {
+                // Workspace with no user-Space window (its windows live in
+                // fullscreen Spaces, or it is empty): let AeroSpace switch;
+                // there is no window whose fullscreen sibling could hijack it.
+                focusEntry = {
+                    Log.write("chain: switch to workspace \(id)")
+                    DispatchQueue.global().async { _ = Aerospace.run(["workspace", id]) }
+                }
+            }
+            if inFullscreen, let userSpaceID = userSpace(in: display) {
+                Log.write("chain: leave fullscreen toward workspace \(id)")
+                _ = navigator.begin(to: userSpaceID, onArrival: focusEntry)
+            } else {
+                focusEntry()
             }
         }
     }
