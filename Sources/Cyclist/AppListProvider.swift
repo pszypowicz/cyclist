@@ -30,29 +30,89 @@ struct ListEntry {
 // holders, so they are represented as one title-less row per Space, resolved
 // through the private per-Space window lists.
 enum AppListProvider {
-    // Titles of windows in other Spaces are unreadable without Screen
-    // Recording permission, but most windows were visible at some point:
-    // remember titles by window id whenever AX can see them and reuse them
-    // for other-Space rows. A title can lag behind a rename that happens
-    // while the window is away.
-    private static var titleCache: [Int: String] = [:]
+    // Titles of windows in other Spaces are mostly unreadable: CG names need
+    // Screen Recording permission and are empty anyway for windows like
+    // Safari's video fullscreen, and AX only reads titles of windows whose
+    // Space is current. So remember titles by window id whenever the AX API
+    // can see them and reuse them for other-Space rows. The cache persists
+    // across app restarts but not reboots (window ids recycle); a title can
+    // lag behind a rename that happens while the window is away.
+    private static let cacheStoreKey = "titleCacheStore"
+    private static let cacheBootKey = "titleCacheBootTime"
+
+    private static var titleCache: [Int: String] = loadCache()
 
     static func cacheTitle(_ title: String, windowID: Int) {
+        guard titleCache[windowID] != title else { return }
         titleCache[windowID] = title
+        persistCache()
     }
 
-    // Harvest titles of the frontmost app's now-visible windows. Called on
-    // every verified Space arrival, so a window's title is remembered from
-    // merely visiting its Space - without this, windows born fullscreen
-    // (e.g. a video player) would stay title-less until the switcher was
-    // summoned inside their Space at least once.
+    // Harvest titles of all windows on the current Space (plus the frontmost
+    // app's). Called on every verified Space arrival, so a window's title is
+    // remembered from merely visiting its Space - without this, windows born
+    // fullscreen (e.g. a video player) would stay title-less until the
+    // switcher was summoned inside their Space at least once.
     static func harvestTitles() {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return }
-        for window in AX.windows(pid: app.processIdentifier) {
-            guard let windowID = AX.windowID(of: window),
-                  let title = AX.string(window, kAXTitleAttribute), !title.isEmpty else { continue }
-            titleCache[windowID] = title
+        var pids: Set<pid_t> = []
+        if let display = Spaces.mainDisplayInfo() {
+            let currentWindows = Spaces.windowIDs(inSpace: display.current)
+            let list = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]] ?? []
+            for info in list {
+                guard let windowID = info[kCGWindowNumber as String] as? Int,
+                      currentWindows.contains(windowID),
+                      let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
+                pids.insert(pid)
+            }
         }
+        if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier {
+            pids.insert(front)
+        }
+        var changed = false
+        for pid in pids {
+            guard NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular else { continue }
+            for window in AX.windows(pid: pid) {
+                guard let windowID = AX.windowID(of: window),
+                      let title = AX.string(window, kAXTitleAttribute), !title.isEmpty,
+                      titleCache[windowID] != title else { continue }
+                titleCache[windowID] = title
+                changed = true
+            }
+        }
+        if changed {
+            persistCache()
+        }
+    }
+
+    private static func bootTime() -> Double {
+        var tv = timeval()
+        var size = MemoryLayout<timeval>.size
+        sysctlbyname("kern.boottime", &tv, &size, nil, 0)
+        return Double(tv.tv_sec)
+    }
+
+    private static func loadCache() -> [Int: String] {
+        let defaults = UserDefaults.standard
+        guard defaults.double(forKey: cacheBootKey) == bootTime(),
+              let stored = defaults.dictionary(forKey: cacheStoreKey) as? [String: String]
+        else { return [:] }
+        var cache: [Int: String] = [:]
+        for (key, title) in stored {
+            if let windowID = Int(key) {
+                cache[windowID] = title
+            }
+        }
+        return cache
+    }
+
+    private static func persistCache() {
+        let defaults = UserDefaults.standard
+        defaults.set(bootTime(), forKey: cacheBootKey)
+        defaults.set(
+            Dictionary(uniqueKeysWithValues: titleCache.map { (String($0.key), $0.value) }),
+            forKey: cacheStoreKey
+        )
     }
 
     static func snapshot(mru: MRUTracker) -> [ListEntry] {
@@ -87,7 +147,7 @@ enum AppListProvider {
                 let title = AX.string(window, kAXTitleAttribute) ?? ""
                 let windowID = AX.windowID(of: window)
                 if let windowID, !title.isEmpty {
-                    titleCache[windowID] = title
+                    cacheTitle(title, windowID: windowID)
                 }
                 appEntries.append(ListEntry(
                     app: app,
