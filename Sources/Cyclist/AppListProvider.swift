@@ -24,17 +24,22 @@ struct AppItem {
 // - hidden comes straight from NSRunningApplication
 // - minimized is derived from the AXMinimized attribute of the app's windows
 // - other Spaces is inferred: the AX API cannot see windows in other Spaces,
-//   so an app that reports no AX windows but owns CGWindowList windows must
-//   have them elsewhere (another Space or a native fullscreen Space)
+//   so an app with no AX windows that owns a window assigned to a Space that
+//   is not currently visible has that window elsewhere (another Space or a
+//   native fullscreen Space). Space membership has to come from private CGS
+//   calls; apps also keep phantom windows alive after their last real window
+//   closes, and those are either Space-less or sit on the visible Space where
+//   AX would have seen a real one.
 enum AppListProvider {
     static func snapshot(mru: MRUTracker) -> [AppItem] {
-        let cgCounts = cgWindowCounts()
+        let cgWindows = cgWindowIDs()
+        let visibleSpaces = Spaces.visibleSpaceIDs()
         var items: [AppItem] = []
         for app in NSWorkspace.shared.runningApplications {
             guard app.activationPolicy == .regular, !app.isTerminated else { continue }
             guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { continue }
-            let cgCount = cgCounts[app.processIdentifier] ?? 0
-            let (state, axCount) = classify(app: app, cgWindowCount: cgCount)
+            let windowIDs = cgWindows[app.processIdentifier] ?? []
+            let (state, axCount) = classify(app: app, windowIDs: windowIDs, visibleSpaces: visibleSpaces)
             switch state {
             case .hidden where !Settings.includeHidden: continue
             case .minimized where !Settings.includeMinimized: continue
@@ -46,7 +51,7 @@ enum AppListProvider {
                 name: app.localizedName ?? "Unknown",
                 state: state,
                 axWindowCount: axCount,
-                cgWindowCount: cgCount
+                cgWindowCount: windowIDs.count
             ))
         }
         items.sort {
@@ -55,35 +60,47 @@ enum AppListProvider {
         return items
     }
 
-    private static func classify(app: NSRunningApplication, cgWindowCount: Int) -> (AppState, Int) {
+    private static func classify(
+        app: NSRunningApplication,
+        windowIDs: [Int],
+        visibleSpaces: Set<UInt64>
+    ) -> (AppState, Int) {
         let windows = AX.windows(pid: app.processIdentifier)
         if app.isHidden { return (.hidden, windows.count) }
         if windows.isEmpty {
-            return cgWindowCount > 0 ? (.otherSpace, 0) : (.noWindows, 0)
+            // A window on a Space that is not currently visible is genuinely
+            // elsewhere. Space-less windows and windows sitting on the visible
+            // Space (where AX would have seen a real one) are phantoms left
+            // behind by closed windows.
+            let hasWindowElsewhere = windowIDs.contains { id in
+                let spaces = Spaces.spaceIDs(ofWindow: id)
+                return !spaces.isEmpty && spaces.isDisjoint(with: visibleSpaces)
+            }
+            return (hasWindowElsewhere ? .otherSpace : .noWindows, 0)
         }
         let allMinimized = windows.allSatisfy { AX.bool($0, kAXMinimizedAttribute) == true }
         return (allMinimized ? .minimized : .normal, windows.count)
     }
 
-    private static func cgWindowCounts() -> [pid_t: Int] {
+    private static func cgWindowIDs() -> [pid_t: [Int]] {
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return [:]
         }
-        var counts: [pid_t: Int] = [:]
+        var ids: [pid_t: [Int]] = [:]
         for info in list {
-            // Many apps keep invisible bookkeeping windows at layer 0 after
-            // their last real window closes (Electron apps especially), so a
-            // bare layer check produces phantom "other space" windows. Only
-            // count windows that are visible and plausibly user-sized.
+            // Layer 0 alone is not enough: apps keep invisible bookkeeping
+            // windows there (menu bar sized strips, cached Electron shells).
+            // Require visible alpha and a plausibly user-sized frame.
             guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
                   let alpha = info[kCGWindowAlpha as String] as? Double, alpha > 0,
                   let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
                   let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
                   bounds.width >= 100, bounds.height >= 50,
+                  let windowID = info[kCGWindowNumber as String] as? Int,
                   let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
-            counts[pid, default: 0] += 1
+            ids[pid, default: []].append(windowID)
         }
-        return counts
+        return ids
     }
 }
