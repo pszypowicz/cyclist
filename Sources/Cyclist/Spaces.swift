@@ -104,7 +104,26 @@ enum Spaces {
         _ = postEvent(&psn, &bytes)
     }
 
-    private static func windowIDs(inSpace spaceID: UInt64) -> Set<Int> {
+    // Space order, types, and current Space of the primary display.
+    static func mainDisplayInfo() -> (order: [UInt64], types: [UInt64: Int], current: UInt64)? {
+        guard let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID())?
+            .takeRetainedValue() as? [[String: Any]],
+              let display = displays.first,
+              let spaces = display["Spaces"] as? [[String: Any]],
+              let current = (display["Current Space"] as? [String: Any])?["id64"] as? UInt64
+        else { return nil }
+        var order: [UInt64] = []
+        var types: [UInt64: Int] = [:]
+        for space in spaces {
+            if let id = space["id64"] as? UInt64 {
+                order.append(id)
+                types[id] = space["type"] as? Int ?? -1
+            }
+        }
+        return (order, types, current)
+    }
+
+    static func windowIDs(inSpace spaceID: UInt64) -> Set<Int> {
         guard let copyWindows = SLSCopyWindowsWithOptionsAndTags else { return [] }
         var setTags: UInt64 = 0
         var clearTags: UInt64 = 0
@@ -199,17 +218,4 @@ enum Spaces {
         }
     }
 
-    // One press of the Mission Control "Move left/right a space" shortcut.
-    // Keystrokes handled by the Dock are the only safe route into an
-    // existing fullscreen Space (plain app activation never transitions
-    // there, native Cmd+Tab included), and they carry the native animation.
-    // Requires those Mission Control shortcuts to remain enabled.
-    static func postCtrlArrow(right: Bool) {
-        let keyCode: CGKeyCode = right ? 124 : 123
-        for down in [true, false] {
-            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: down) else { continue }
-            event.flags = .maskControl
-            event.post(tap: .cghidEventTap)
-        }
-    }
 }

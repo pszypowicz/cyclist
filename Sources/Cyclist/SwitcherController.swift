@@ -9,6 +9,8 @@ final class SwitcherController {
     private let mru: MRUTracker
     private let panel = SwitcherPanel()
     private let navigator = SpaceNavigator()
+    private lazy var chain = ChainNavigator(navigator: navigator)
+    private let swipeDetector = SwipeDetector()
 
     private enum Session {
         case apps([ListEntry], index: Int)
@@ -20,6 +22,8 @@ final class SwitcherController {
     private let tabKey: Int64 = 48
     private let graveKey: Int64 = 50
     private let escapeKey: Int64 = 53
+    private let leftArrowKey: Int64 = 123
+    private let rightArrowKey: Int64 = 124
 
     init(mru: MRUTracker) {
         self.mru = mru
@@ -28,6 +32,14 @@ final class SwitcherController {
         }
         tap.onFlagsChanged = { [weak self] event in
             self?.handleFlagsChanged(event)
+        }
+        tap.onGesture = { [weak self] event in
+            self?.swipeDetector.handle(event)
+        }
+        // Natural-scroll convention, matching the trackpad: fingers left
+        // moves forward through the chain, fingers right moves back.
+        swipeDetector.onSwipe = { [weak self] fingersLeft in
+            DispatchQueue.main.async { self?.chain.navigate(left: !fingersLeft) }
         }
     }
 
@@ -42,6 +54,9 @@ final class SwitcherController {
         let backward = flags.contains(.maskShift)
         let otherModifiers = flags.contains(.maskControl) || flags.contains(.maskAlternate)
 
+        let controlOnly = flags.contains(.maskControl) && !command && !backward
+            && !flags.contains(.maskAlternate)
+
         switch keyCode {
         case tabKey where command && !otherModifiers:
             advanceApps(backward: backward)
@@ -51,6 +66,12 @@ final class SwitcherController {
             return true
         case escapeKey where session != nil:
             cancel()
+            return true
+        case leftArrowKey where controlOnly, rightArrowKey where controlOnly:
+            // Workspace/Space chain navigation. Handled off the tap callback
+            // so AeroSpace CLI calls cannot stall the tap.
+            let left = keyCode == leftArrowKey
+            DispatchQueue.main.async { [weak self] in self?.chain.navigate(left: left) }
             return true
         default:
             return false
@@ -210,6 +231,18 @@ final class SwitcherController {
         }
         if let window = entry.axWindow, AX.bool(window, kAXMinimizedAttribute) == true {
             AX.setBool(window, kAXMinimizedAttribute, false)
+        }
+        // Rapid switching can leave AX still listing windows of the Space
+        // just left, so a "normal" row may actually live in a non-visible
+        // Space; focusing it alone would move the menu bar without the
+        // Space. Verify real Space membership and reroute.
+        if entry.state == .normal, let windowID = entry.windowID {
+            for (space, windowIDs) in Spaces.windowsByNonVisibleSpace()
+            where windowIDs.contains(windowID) {
+                Log.write("activate: window \(windowID) is actually in space \(space), navigating")
+                _ = navigator.begin(to: space, focusPid: app.processIdentifier, windowID: windowID)
+                return
+            }
         }
         if let windowID = entry.windowID {
             Spaces.makeKey(pid: app.processIdentifier, windowID: windowID)

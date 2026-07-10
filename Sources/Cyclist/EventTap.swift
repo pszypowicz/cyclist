@@ -3,9 +3,14 @@ import AppKit
 // Session-level CGEventTap for keyDown and flagsChanged. This is what lets
 // Cyclist swallow Cmd+Tab before the Dock's native switcher sees it.
 final class EventTap {
+    // Raw CGS gesture events (trackpad touches) are not in the public
+    // CGEventType enum.
+    private static let gestureEventType: UInt32 = 29
+
     // Return true to consume the event.
     var onKeyDown: ((CGEvent) -> Bool)?
     var onFlagsChanged: ((CGEvent) -> Void)?
+    var onGesture: ((CGEvent) -> Void)?
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -13,6 +18,7 @@ final class EventTap {
     func start() -> Bool {
         guard tap == nil else { return true }
         let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
+            | (1 << Self.gestureEventType)
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -51,6 +57,9 @@ final class EventTap {
             onFlagsChanged?(event)
             return Unmanaged.passUnretained(event)
         default:
+            if type.rawValue == Self.gestureEventType {
+                onGesture?(event)
+            }
             return Unmanaged.passUnretained(event)
         }
     }
