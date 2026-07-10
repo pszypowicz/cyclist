@@ -1,9 +1,20 @@
 import ApplicationServices
 
+// Maps an AX window element to its CGWindowID; there is no public API for
+// this direction.
+@_silgen_name("_AXUIElementGetWindow")
+private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<UInt32>) -> AXError
+
 // Thin helpers over the Accessibility C API. All calls are bounded by a short
 // global messaging timeout so an unresponsive app cannot stall the switcher
 // (a stalled event tap callback gets disabled by the system).
 enum AX {
+    static func windowID(of element: AXUIElement) -> Int? {
+        var wid: UInt32 = 0
+        guard _AXUIElementGetWindow(element, &wid) == .success, wid != 0 else { return nil }
+        return Int(wid)
+    }
+
     static func configureGlobalTimeout() {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.05)
     }

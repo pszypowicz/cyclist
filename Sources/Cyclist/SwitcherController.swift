@@ -184,31 +184,43 @@ final class SwitcherController {
         }
         // Switching the current Space and making the target window key are
         // separate WindowServer operations; neither implies the other, so do
-        // both, synchronously and in this order. Without the key window the
-        // old fullscreen Space keeps compositing underneath and the menu bar
-        // keeps naming the previous app.
-        if entry.state == .otherSpace, let spaceID = entry.spaceID, let windowID = entry.windowID {
+        // both, synchronously and in this order. The make-key applies to
+        // every window row, not just other-Space ones: since macOS 14,
+        // NSRunningApplication.activate is an advisory request the system
+        // ignores from here, so it cannot move activation (or the menu bar)
+        // by itself.
+        if entry.state == .otherSpace, let spaceID = entry.spaceID {
             Spaces.switchTo(spaceID: spaceID)
-            Spaces.makeKey(pid: app.processIdentifier, windowID: windowID)
-            return
         }
         if app.isHidden {
             app.unhide()
         }
-        if let window = entry.axWindow {
-            if AX.bool(window, kAXMinimizedAttribute) == true {
-                AX.setBool(window, kAXMinimizedAttribute, false)
-            }
-            AX.raise(window)
+        if let window = entry.axWindow, AX.bool(window, kAXMinimizedAttribute) == true {
+            AX.setBool(window, kAXMinimizedAttribute, false)
         }
-        app.activate(options: [.activateIgnoringOtherApps])
+        if let windowID = entry.windowID {
+            Spaces.makeKey(pid: app.processIdentifier, windowID: windowID)
+            if let window = entry.axWindow {
+                AX.raise(window)
+            }
+        } else if let window = entry.axWindow {
+            AX.raise(window)
+            app.activate(options: [.activateIgnoringOtherApps])
+        } else {
+            app.activate(options: [.activateIgnoringOtherApps])
+        }
     }
 
     private func focus(_ item: WindowItem, of app: NSRunningApplication) {
         if item.isMinimized {
             AX.setBool(item.element, kAXMinimizedAttribute, false)
         }
-        AX.raise(item.element)
-        app.activate(options: [.activateIgnoringOtherApps])
+        if let windowID = item.windowID {
+            Spaces.makeKey(pid: app.processIdentifier, windowID: windowID)
+            AX.raise(item.element)
+        } else {
+            AX.raise(item.element)
+            app.activate(options: [.activateIgnoringOtherApps])
+        }
     }
 }

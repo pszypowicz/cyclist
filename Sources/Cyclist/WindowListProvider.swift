@@ -5,6 +5,7 @@ struct WindowItem {
     let element: AXUIElement
     let title: String
     let isMinimized: Bool
+    let windowID: Int?
 }
 
 // Windows of a single app for the same-app cycling session. The AX API only
@@ -24,7 +25,8 @@ enum WindowListProvider {
             items.append(WindowItem(
                 element: window,
                 title: title.isEmpty ? (app.localizedName ?? "Untitled") : title,
-                isMinimized: minimized
+                isMinimized: minimized,
+                windowID: AX.windowID(of: window)
             ))
         }
         return items

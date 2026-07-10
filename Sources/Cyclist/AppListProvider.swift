@@ -67,7 +67,7 @@ enum AppListProvider {
                     state: state,
                     axWindow: window,
                     spaceID: nil,
-                    windowID: nil
+                    windowID: AX.windowID(of: window)
                 ))
             }
 
