@@ -18,6 +18,7 @@ struct ListEntry {
     let state: EntryState
     let axWindow: AXUIElement?  // set for normal/minimized/hidden rows
     let spaceID: UInt64?        // set for otherSpace rows
+    let windowID: Int?          // set for otherSpace rows
 }
 
 // Builds the switcher list: every window of every regular app, in app MRU
@@ -65,7 +66,8 @@ enum AppListProvider {
                     windowTitle: title.isEmpty ? nil : title,
                     state: state,
                     axWindow: window,
-                    spaceID: nil
+                    spaceID: nil,
+                    windowID: nil
                 ))
             }
 
@@ -73,7 +75,7 @@ enum AppListProvider {
             // a window of this app.
             let appWindowIDs = cgWindows[app.processIdentifier] ?? []
             for (space, windowIDs) in otherSpaceWindows {
-                guard appWindowIDs.contains(where: { windowIDs.contains($0) }) else { continue }
+                guard let windowID = appWindowIDs.first(where: { windowIDs.contains($0) }) else { continue }
                 hasAnyWindow = true
                 guard Settings.includeOtherSpaces else { continue }
                 appEntries.append(ListEntry(
@@ -82,7 +84,8 @@ enum AppListProvider {
                     windowTitle: nil,
                     state: .otherSpace,
                     axWindow: nil,
-                    spaceID: space
+                    spaceID: space,
+                    windowID: windowID
                 ))
             }
 
@@ -93,7 +96,8 @@ enum AppListProvider {
                     windowTitle: nil,
                     state: .noWindows,
                     axWindow: nil,
-                    spaceID: nil
+                    spaceID: nil,
+                    windowID: nil
                 ))
             }
             entries.append(contentsOf: appEntries)

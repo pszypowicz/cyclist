@@ -179,9 +179,20 @@ final class SwitcherController {
             return
         }
         // Activation alone never switches Spaces (the Dock does that part for
-        // the native switcher), so jump to the window's Space first.
+        // the native switcher), so jump to the window's Space, then make the
+        // target window key once the switch has settled; without that step
+        // the WindowServer is left half-switched, still compositing the old
+        // fullscreen Space with a stale menu bar.
         if entry.state == .otherSpace, let spaceID = entry.spaceID {
             Spaces.switchTo(spaceID: spaceID)
+            if let windowID = entry.windowID {
+                let pid = app.processIdentifier
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    Spaces.makeKey(pid: pid, windowID: windowID)
+                    app.activate(options: [.activateIgnoringOtherApps])
+                }
+                return
+            }
         }
         if app.isHidden {
             app.unhide()

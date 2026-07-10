@@ -16,11 +16,31 @@ private typealias SLSCopyWindowsWithOptionsAndTagsFn = @convention(c) (
     UnsafeMutablePointer<UInt64>, UnsafeMutablePointer<UInt64>
 ) -> Unmanaged<CFArray>?
 
-private let SLSCopyWindowsWithOptionsAndTags: SLSCopyWindowsWithOptionsAndTagsFn? = {
+private func resolve<T>(_ name: String, as type: T.Type) -> T? {
     let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
-    guard let symbol = dlsym(rtldDefault, "SLSCopyWindowsWithOptionsAndTags") else { return nil }
-    return unsafeBitCast(symbol, to: SLSCopyWindowsWithOptionsAndTagsFn.self)
-}()
+    guard let symbol = dlsym(rtldDefault, name) else { return nil }
+    return unsafeBitCast(symbol, to: type)
+}
+
+private let SLSCopyWindowsWithOptionsAndTags =
+    resolve("SLSCopyWindowsWithOptionsAndTags", as: SLSCopyWindowsWithOptionsAndTagsFn.self)
+
+private typealias SLPSSetFrontProcessFn = @convention(c) (
+    UnsafeMutablePointer<ProcessSerialNumber>, UInt32, UInt32
+) -> Int32
+private typealias SLPSPostEventRecordToFn = @convention(c) (
+    UnsafeMutablePointer<ProcessSerialNumber>, UnsafeMutablePointer<UInt8>
+) -> Int32
+private typealias GetProcessForPIDFn = @convention(c) (
+    pid_t, UnsafeMutablePointer<ProcessSerialNumber>
+) -> Int32
+
+private let SLPSSetFrontProcessWithOptions =
+    resolve("_SLPSSetFrontProcessWithOptions", as: SLPSSetFrontProcessFn.self)
+private let SLPSPostEventRecordTo =
+    resolve("SLPSPostEventRecordTo", as: SLPSPostEventRecordToFn.self)
+private let GetProcessForPIDFallback =
+    resolve("GetProcessForPID", as: GetProcessForPIDFn.self)
 
 @_silgen_name("CGSCopyManagedDisplaySpaces")
 private func CGSCopyManagedDisplaySpaces(_ cid: UInt32) -> Unmanaged<CFArray>?
@@ -46,6 +66,31 @@ enum Spaces {
             }
         }
         return result
+    }
+
+    // Make a specific window key through the WindowServer, the same way
+    // AltTab and yabai focus windows. Activating the app alone after a Space
+    // change leaves the WindowServer half-switched: the previous fullscreen
+    // Space keeps compositing underneath and the menu bar still names the
+    // old app. The 0xf8-byte records are synthesized window-server focus
+    // events; 0x01/0x02 are their activate/deactivate variants.
+    static func makeKey(pid: pid_t, windowID: Int) {
+        guard let setFront = SLPSSetFrontProcessWithOptions,
+              let postEvent = SLPSPostEventRecordTo,
+              let getPSN = GetProcessForPIDFallback else { return }
+        var psn = ProcessSerialNumber()
+        guard getPSN(pid, &psn) == 0 else { return }
+        let wid = UInt32(windowID)
+        _ = setFront(&psn, wid, 0x200)  // kCPSUserGenerated
+        var bytes = [UInt8](repeating: 0, count: 0xf8)
+        bytes[0x04] = 0xf8
+        bytes[0x3a] = 0x10
+        withUnsafeBytes(of: wid) { for i in 0..<4 { bytes[0x3c + i] = $0[i] } }
+        for i in 0x20..<0x30 { bytes[i] = 0xff }
+        bytes[0x08] = 0x01
+        _ = postEvent(&psn, &bytes)
+        bytes[0x08] = 0x02
+        _ = postEvent(&psn, &bytes)
     }
 
     private static func windowIDs(inSpace spaceID: UInt64) -> Set<Int> {
