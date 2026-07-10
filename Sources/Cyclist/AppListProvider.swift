@@ -27,11 +27,12 @@ struct ListEntry {
 // apps) come from the AX API with their titles. Windows in other Spaces are
 // invisible to AX and macOS only reveals their titles to Screen Recording
 // holders, so they are represented as one title-less row per Space, resolved
-// through the private CGS Space membership calls.
+// through the private per-Space window lists.
 enum AppListProvider {
     static func snapshot(mru: MRUTracker) -> [ListEntry] {
         let cgWindows = cgWindowIDs()
-        let visibleSpaces = Spaces.visibleSpaceIDs()
+        let otherSpaceWindows = Spaces.windowsByNonVisibleSpace()
+            .sorted { $0.key < $1.key }
 
         let apps = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular && !$0.isTerminated
@@ -68,13 +69,11 @@ enum AppListProvider {
                 ))
             }
 
-            // One row per Space that holds windows of this app elsewhere.
-            var seenSpaces: Set<UInt64> = []
-            for windowID in cgWindows[app.processIdentifier] ?? [] {
-                let spaces = Spaces.spaceIDs(ofWindow: windowID)
-                guard let space = spaces.first, spaces.isDisjoint(with: visibleSpaces),
-                      !seenSpaces.contains(space) else { continue }
-                seenSpaces.insert(space)
+            // One row per existing non-visible Space that actually contains
+            // a window of this app.
+            let appWindowIDs = cgWindows[app.processIdentifier] ?? []
+            for (space, windowIDs) in otherSpaceWindows {
+                guard appWindowIDs.contains(where: { windowIDs.contains($0) }) else { continue }
                 hasAnyWindow = true
                 guard Settings.includeOtherSpaces else { continue }
                 appEntries.append(ListEntry(
