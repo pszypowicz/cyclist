@@ -16,7 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Optional: unlocks live titles for windows in other Spaces via
         // CGWindowList. Used solely to read titles; Cyclist never captures
         // window contents. Without it, last-seen titles are used instead.
-        if !CGPreflightScreenCaptureAccess() {
+        let screenRecording = CGPreflightScreenCaptureAccess()
+        Log.write("startup: screen recording \(screenRecording ? "granted" : "not granted")")
+        if !screenRecording {
             CGRequestScreenCaptureAccess()
         }
     }

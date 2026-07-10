@@ -53,6 +53,7 @@ final class SpaceNavigator {
             let arrival = onArrival
             cancel()
             arrival?()
+            AppListProvider.harvestTitles()
             return
         }
 

@@ -41,6 +41,20 @@ enum AppListProvider {
         titleCache[windowID] = title
     }
 
+    // Harvest titles of the frontmost app's now-visible windows. Called on
+    // every verified Space arrival, so a window's title is remembered from
+    // merely visiting its Space - without this, windows born fullscreen
+    // (e.g. a video player) would stay title-less until the switcher was
+    // summoned inside their Space at least once.
+    static func harvestTitles() {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return }
+        for window in AX.windows(pid: app.processIdentifier) {
+            guard let windowID = AX.windowID(of: window),
+                  let title = AX.string(window, kAXTitleAttribute), !title.isEmpty else { continue }
+            titleCache[windowID] = title
+        }
+    }
+
     static func snapshot(mru: MRUTracker) -> [ListEntry] {
         let (cgWindows, cgTitles) = cgWindowInventory()
         let otherSpaceWindows = Spaces.windowsByNonVisibleSpace()
