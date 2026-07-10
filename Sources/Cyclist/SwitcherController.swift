@@ -77,7 +77,7 @@ final class SwitcherController {
             let start = startIndex(count: items.count, backward: backward)
             session = .apps(items, index: start)
             presentPanel(
-                rows: items.map { SwitcherRow(title: $0.name, annotation: annotation(for: $0.state)) },
+                rows: items.map { SwitcherRow(title: $0.name, annotation: annotation(for: $0)) },
                 selected: start
             )
         }
@@ -114,12 +114,16 @@ final class SwitcherController {
         return (index + (backward ? count - 1 : 1)) % count
     }
 
-    private func annotation(for state: AppState) -> String? {
-        switch state {
-        case .normal: return nil
-        case .hidden: return "hidden"
-        case .minimized: return "minimized"
-        case .otherSpace: return "other space"
+    // Diagnostic window counts in every row are temporary scaffolding for the
+    // beta, to make state misclassifications visible in place.
+    private func annotation(for item: AppItem) -> String? {
+        let counts = "ax\(item.axWindowCount) cg\(item.cgWindowCount)"
+        switch item.state {
+        case .normal: return counts
+        case .hidden: return "hidden · \(counts)"
+        case .minimized: return "minimized · \(counts)"
+        case .otherSpace: return "other space · \(counts)"
+        case .noWindows: return "no windows · \(counts)"
         }
     }
 
@@ -164,6 +168,15 @@ final class SwitcherController {
            let window = AX.windows(pid: app.processIdentifier)
                .first(where: { AX.bool($0, kAXMinimizedAttribute) == true }) {
             AX.setBool(window, kAXMinimizedAttribute, false)
+        }
+        // Plain activation does nothing visible for an app with no windows.
+        // Launching it again is Dock-click semantics: the app gets a reopen
+        // event and recreates its window.
+        if item.state == .noWindows, let url = app.bundleURL {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+            return
         }
         app.activate(options: [.activateIgnoringOtherApps])
     }

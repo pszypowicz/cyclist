@@ -5,13 +5,16 @@ enum AppState {
     case normal
     case hidden
     case minimized   // has windows and all of them are minimized
-    case otherSpace  // no windows reachable via AX, but owns windows somewhere
+    case otherSpace  // no windows reachable via AX, but owns real windows somewhere
+    case noWindows   // running with no real windows anywhere
 }
 
 struct AppItem {
     let app: NSRunningApplication
     let name: String
     let state: AppState
+    let axWindowCount: Int
+    let cgWindowCount: Int
 }
 
 // Builds the app list for a switcher session: all regular apps, classified
@@ -30,14 +33,21 @@ enum AppListProvider {
         for app in NSWorkspace.shared.runningApplications {
             guard app.activationPolicy == .regular, !app.isTerminated else { continue }
             guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { continue }
-            let state = classify(app: app, cgWindowCount: cgCounts[app.processIdentifier] ?? 0)
+            let cgCount = cgCounts[app.processIdentifier] ?? 0
+            let (state, axCount) = classify(app: app, cgWindowCount: cgCount)
             switch state {
             case .hidden where !Settings.includeHidden: continue
             case .minimized where !Settings.includeMinimized: continue
             case .otherSpace where !Settings.includeOtherSpaces: continue
             default: break
             }
-            items.append(AppItem(app: app, name: app.localizedName ?? "Unknown", state: state))
+            items.append(AppItem(
+                app: app,
+                name: app.localizedName ?? "Unknown",
+                state: state,
+                axWindowCount: axCount,
+                cgWindowCount: cgCount
+            ))
         }
         items.sort {
             mru.position(of: $0.app.processIdentifier) < mru.position(of: $1.app.processIdentifier)
@@ -45,14 +55,14 @@ enum AppListProvider {
         return items
     }
 
-    private static func classify(app: NSRunningApplication, cgWindowCount: Int) -> AppState {
-        if app.isHidden { return .hidden }
+    private static func classify(app: NSRunningApplication, cgWindowCount: Int) -> (AppState, Int) {
         let windows = AX.windows(pid: app.processIdentifier)
+        if app.isHidden { return (.hidden, windows.count) }
         if windows.isEmpty {
-            return cgWindowCount > 0 ? .otherSpace : .normal
+            return cgWindowCount > 0 ? (.otherSpace, 0) : (.noWindows, 0)
         }
         let allMinimized = windows.allSatisfy { AX.bool($0, kAXMinimizedAttribute) == true }
-        return allMinimized ? .minimized : .normal
+        return (allMinimized ? .minimized : .normal, windows.count)
     }
 
     private static func cgWindowCounts() -> [pid_t: Int] {
@@ -62,7 +72,15 @@ enum AppListProvider {
         }
         var counts: [pid_t: Int] = [:]
         for info in list {
+            // Many apps keep invisible bookkeeping windows at layer 0 after
+            // their last real window closes (Electron apps especially), so a
+            // bare layer check produces phantom "other space" windows. Only
+            // count windows that are visible and plausibly user-sized.
             guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let alpha = info[kCGWindowAlpha as String] as? Double, alpha > 0,
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
+                  bounds.width >= 100, bounds.height >= 50,
                   let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
             counts[pid, default: 0] += 1
         }
