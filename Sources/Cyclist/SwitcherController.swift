@@ -52,10 +52,10 @@ final class SwitcherController {
         let flags = event.flags
         let command = flags.contains(.maskCommand)
         let backward = flags.contains(.maskShift)
-        let otherModifiers = flags.contains(.maskControl) || flags.contains(.maskAlternate)
-
-        let controlOnly = flags.contains(.maskControl) && !command && !backward
-            && !flags.contains(.maskAlternate)
+        let control = flags.contains(.maskControl)
+        let alternate = flags.contains(.maskAlternate)
+        let otherModifiers = control || alternate
+        let controlOnly = control && !command && !backward && !alternate
 
         switch keyCode {
         case tabKey where command && !otherModifiers:
@@ -185,7 +185,9 @@ final class SwitcherController {
         case .apps(let items, let index):
             activate(items[index])
         case .windows(let app, let items, let index):
-            focus(items[index], of: app)
+            navigator.cancel()
+            let item = items[index]
+            focusWindow(app: app, element: item.element, windowID: item.windowID)
         }
     }
 
@@ -206,14 +208,12 @@ final class SwitcherController {
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
             return
         }
-        // Reaching a window in another Space needs a real Mission Control
-        // transition, which only the Dock can perform: navigate there with
-        // the synthesized Ctrl+Arrow shortcut, then make the target window
-        // key. A Dock icon press is the fallback (it activates natively but
-        // does not enter fullscreen Spaces). The make-key also covers
-        // same-Space rows: since macOS 14, NSRunningApplication.activate is
-        // an advisory request the system ignores from here, so it cannot
-        // move activation (or the menu bar) by itself.
+        // Reaching a window in another Space needs a real Space transition
+        // (activation alone never performs one), so jump there and make the
+        // target window key on arrival. The make-key also covers same-Space
+        // rows: since macOS 14, NSRunningApplication.activate is an advisory
+        // request the system ignores from here, so it cannot move activation
+        // (or the menu bar) by itself.
         if entry.state == .otherSpace {
             let pid = app.processIdentifier
             let windowID = entry.windowID
@@ -224,17 +224,10 @@ final class SwitcherController {
                 Log.write("navigate: \(entry.appName) space=\(spaceID)")
                 return
             }
-            if Dock.pressIcon(named: entry.appName) {
-                Log.write("dock press: \(entry.appName)")
-                return
-            }
-            Log.write("otherSpace activation fallback for \(entry.appName)")
+            Log.write("otherSpace navigation unavailable for \(entry.appName)")
         }
         if app.isHidden {
             app.unhide()
-        }
-        if let window = entry.axWindow, AX.bool(window, kAXMinimizedAttribute) == true {
-            AX.setBool(window, kAXMinimizedAttribute, false)
         }
         // Rapid switching can leave AX still listing windows of the Space
         // just left, so a "normal" row may actually live in a non-visible
@@ -251,28 +244,22 @@ final class SwitcherController {
                 return
             }
         }
-        if let windowID = entry.windowID {
-            Spaces.makeKey(pid: app.processIdentifier, windowID: windowID)
-            if let window = entry.axWindow {
-                AX.raise(window)
-            }
-        } else if let window = entry.axWindow {
-            AX.raise(window)
-            app.activate(options: [.activateIgnoringOtherApps])
-        } else {
-            app.activate(options: [.activateIgnoringOtherApps])
-        }
+        focusWindow(app: app, element: entry.axWindow, windowID: entry.windowID)
     }
 
-    private func focus(_ item: WindowItem, of app: NSRunningApplication) {
-        if item.isMinimized {
-            AX.setBool(item.element, kAXMinimizedAttribute, false)
+    private func focusWindow(app: NSRunningApplication, element: AXUIElement?, windowID: Int?) {
+        if let element, AX.bool(element, kAXMinimizedAttribute) == true {
+            AX.setBool(element, kAXMinimizedAttribute, false)
         }
-        if let windowID = item.windowID {
+        if let windowID {
             Spaces.makeKey(pid: app.processIdentifier, windowID: windowID)
-            AX.raise(item.element)
+            if let element {
+                AX.raise(element)
+            }
+        } else if let element {
+            AX.raise(element)
+            app.activate(options: [.activateIgnoringOtherApps])
         } else {
-            AX.raise(item.element)
             app.activate(options: [.activateIgnoringOtherApps])
         }
     }

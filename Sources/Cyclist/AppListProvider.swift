@@ -57,13 +57,9 @@ enum AppListProvider {
         var pids: Set<pid_t> = []
         if let display = Spaces.mainDisplayInfo() {
             let currentWindows = Spaces.windowIDs(inSpace: display.current)
-            let list = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID)
-                as? [[String: Any]] ?? []
-            for info in list {
-                guard let windowID = info[kCGWindowNumber as String] as? Int,
-                      currentWindows.contains(windowID),
-                      let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
-                pids.insert(pid)
+            for window in CGWindows.real([.optionAll, .excludeDesktopElements])
+            where currentWindows.contains(window.id) {
+                pids.insert(window.pid)
             }
         }
         if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier {
@@ -116,7 +112,12 @@ enum AppListProvider {
     }
 
     static func snapshot(mru: MRUTracker) -> [ListEntry] {
-        let (cgWindows, cgTitles) = cgWindowInventory()
+        var cgWindows: [pid_t: [Int]] = [:]
+        var cgTitles: [Int: String] = [:]
+        for window in CGWindows.real([.optionAll, .excludeDesktopElements]) {
+            cgWindows[window.pid, default: []].append(window.id)
+            cgTitles[window.id] = window.title
+        }
         let otherSpaceWindows = Spaces.windowsByNonVisibleSpace()
             .sorted { $0.key < $1.key }
 
@@ -160,8 +161,6 @@ enum AppListProvider {
                 ))
             }
 
-            // One row per existing non-visible Space that actually contains
-            // a window of this app.
             // One row per real window in each non-visible Space. Titles come
             // from CGWindowList when Screen Recording permission is granted
             // (used solely for titles, never captures), else from the cache
@@ -201,31 +200,4 @@ enum AppListProvider {
         return entries
     }
 
-    private static func cgWindowInventory() -> (ids: [pid_t: [Int]], titles: [Int: String]) {
-        let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
-        guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            return ([:], [:])
-        }
-        var ids: [pid_t: [Int]] = [:]
-        var titles: [Int: String] = [:]
-        for info in list {
-            // Layer 0 alone is not enough: apps keep invisible bookkeeping
-            // windows there (menu bar sized strips, cached Electron shells,
-            // the ~52pt fullscreen toolbar hover strip). Require visible alpha
-            // and a plausibly user-sized frame.
-            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
-                  let alpha = info[kCGWindowAlpha as String] as? Double, alpha > 0,
-                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
-                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
-                  bounds.width >= 100, bounds.height >= 80,
-                  let windowID = info[kCGWindowNumber as String] as? Int,
-                  let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
-            ids[pid, default: []].append(windowID)
-            // Populated only when Screen Recording permission is granted.
-            if let name = info[kCGWindowName as String] as? String, !name.isEmpty {
-                titles[windowID] = name
-            }
-        }
-        return (ids, titles)
-    }
 }

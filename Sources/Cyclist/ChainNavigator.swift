@@ -40,20 +40,10 @@ final class ChainNavigator {
     // Front-to-back on-screen window list; the first regular-app window is
     // what the user sees on top of the current Space.
     private static func focusTopUserWindow() {
-        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-        for info in list {
-            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
-                  let alpha = info[kCGWindowAlpha as String] as? Double, alpha > 0,
-                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
-                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
-                  bounds.width >= 100, bounds.height >= 80,
-                  let windowID = info[kCGWindowNumber as String] as? Int,
-                  let pid = info[kCGWindowOwnerPID as String] as? pid_t,
-                  NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular
-            else { continue }
-            Log.write("chain: focus top window \(windowID) pid \(pid)")
-            Spaces.makeKey(pid: pid, windowID: windowID)
-            return
-        }
+        guard let window = CGWindows.real([.optionOnScreenOnly]).first(where: {
+            NSRunningApplication(processIdentifier: $0.pid)?.activationPolicy == .regular
+        }) else { return }
+        Log.write("chain: focus top window \(window.id) pid \(window.pid)")
+        Spaces.makeKey(pid: window.pid, windowID: window.id)
     }
 }

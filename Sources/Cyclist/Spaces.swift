@@ -45,20 +45,59 @@ private let GetProcessForPIDFallback =
 @_silgen_name("CGSCopyManagedDisplaySpaces")
 private func CGSCopyManagedDisplaySpaces(_ cid: UInt32) -> Unmanaged<CFArray>?
 
+// NOTE: never drive the Space state itself (CGSManagedDisplaySetCurrentSpace,
+// SLSShowSpaces/SLSHideSpaces) from here. Those flip WindowServer bookkeeping
+// without the Mission Control choreography: the old Space keeps compositing
+// underneath the new one, and once desynchronized even native transitions
+// stop working until the WindowServer state resets.
 enum Spaces {
+    typealias DisplayInfo = (order: [UInt64], types: [UInt64: Int], current: UInt64)
+
+    private static func managedDisplays() -> [[String: Any]] {
+        CGSCopyManagedDisplaySpaces(CGSMainConnectionID())?
+            .takeRetainedValue() as? [[String: Any]] ?? []
+    }
+
+    private static func parse(_ display: [String: Any]) -> DisplayInfo? {
+        guard let spaces = display["Spaces"] as? [[String: Any]],
+              let current = (display["Current Space"] as? [String: Any])?["id64"] as? UInt64
+        else { return nil }
+        var order: [UInt64] = []
+        var types: [UInt64: Int] = [:]
+        for space in spaces {
+            if let id = space["id64"] as? UInt64 {
+                order.append(id)
+                types[id] = space["type"] as? Int ?? -1
+            }
+        }
+        return (order, types, current)
+    }
+
+    // Space order, types, and current Space of the primary display.
+    static func mainDisplayInfo() -> DisplayInfo? {
+        managedDisplays().first.flatMap(parse)
+    }
+
+    // Same, for the display whose Space order contains the given Space.
+    static func orderInfo(containing spaceID: UInt64) -> DisplayInfo? {
+        for display in managedDisplays() {
+            if let info = parse(display), info.order.contains(spaceID) {
+                return info
+            }
+        }
+        return nil
+    }
+
     // Window IDs actually present in each Space that exists but is not
     // currently shown on any display. The per-Space window list is the
     // authority here: CGSCopySpacesForWindows keeps reporting a stale Space
     // assignment for the dead window an app caches after its last real
     // window closes, while the Space's own window list drops it immediately.
     static func windowsByNonVisibleSpace() -> [UInt64: Set<Int>] {
-        guard let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID())?
-            .takeRetainedValue() as? [[String: Any]] else { return [:] }
         var result: [UInt64: Set<Int>] = [:]
-        for display in displays {
-            let current = (display["Current Space"] as? [String: Any])?["id64"] as? UInt64
-            for space in (display["Spaces"] as? [[String: Any]]) ?? [] {
-                guard let id = space["id64"] as? UInt64, id != current else { continue }
+        for display in managedDisplays() {
+            guard let info = parse(display) else { continue }
+            for id in info.order where id != info.current {
                 result[id] = windowIDs(inSpace: id)
             }
         }
@@ -104,25 +143,6 @@ enum Spaces {
         _ = postEvent(&psn, &bytes)
     }
 
-    // Space order, types, and current Space of the primary display.
-    static func mainDisplayInfo() -> (order: [UInt64], types: [UInt64: Int], current: UInt64)? {
-        guard let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID())?
-            .takeRetainedValue() as? [[String: Any]],
-              let display = displays.first,
-              let spaces = display["Spaces"] as? [[String: Any]],
-              let current = (display["Current Space"] as? [String: Any])?["id64"] as? UInt64
-        else { return nil }
-        var order: [UInt64] = []
-        var types: [UInt64: Int] = [:]
-        for space in spaces {
-            if let id = space["id64"] as? UInt64 {
-                order.append(id)
-                types[id] = space["type"] as? Int ?? -1
-            }
-        }
-        return (order, types, current)
-    }
-
     static func windowIDs(inSpace spaceID: UInt64) -> Set<Int> {
         guard let copyWindows = SLSCopyWindowsWithOptionsAndTags else { return [] }
         var setTags: UInt64 = 0
@@ -131,37 +151,6 @@ enum Spaces {
             CGSMainConnectionID(), 0, [NSNumber(value: spaceID)] as CFArray, 0x2, &setTags, &clearTags
         )?.takeRetainedValue() as? [NSNumber] else { return [] }
         return Set(list.map { $0.intValue })
-    }
-
-    // NOTE: never drive the Space state itself (CGSManagedDisplaySetCurrentSpace,
-    // SLSShowSpaces/SLSHideSpaces) from here. Those flip WindowServer
-    // bookkeeping without the Mission Control choreography: the old Space
-    // keeps compositing underneath the new one, and once desynchronized even
-    // native transitions stop working until the WindowServer state resets.
-
-    static let fullscreenSpaceType = 4
-
-    // Space order, per-Space types, and current Space of the display
-    // containing the given Space, for step-by-step navigation.
-    static func orderInfo(containing spaceID: UInt64)
-        -> (order: [UInt64], types: [UInt64: Int], current: UInt64)? {
-        guard let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID())?
-            .takeRetainedValue() as? [[String: Any]] else { return nil }
-        for display in displays {
-            guard let spaces = display["Spaces"] as? [[String: Any]],
-                  let current = (display["Current Space"] as? [String: Any])?["id64"] as? UInt64
-            else { continue }
-            let ids = spaces.compactMap { $0["id64"] as? UInt64 }
-            guard ids.contains(spaceID) else { continue }
-            var types: [UInt64: Int] = [:]
-            for space in spaces {
-                if let id = space["id64"] as? UInt64, let type = space["type"] as? Int {
-                    types[id] = type
-                }
-            }
-            return (ids, types, current)
-        }
-        return nil
     }
 
     // Instant Space switch: synthetic trackpad dock-swipe gestures with
