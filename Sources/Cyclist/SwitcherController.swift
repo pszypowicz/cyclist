@@ -182,15 +182,19 @@ final class SwitcherController {
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
             return
         }
-        // Switching the current Space and making the target window key are
-        // separate WindowServer operations; neither implies the other, so do
-        // both, synchronously and in this order. The make-key applies to
-        // every window row, not just other-Space ones: since macOS 14,
+        // Reaching a window in another Space needs a real Mission Control
+        // transition, which only the Dock can perform (see Dock.swift), so
+        // other-Space rows are activated like a Dock click. The make-key
+        // below covers same-Space rows: since macOS 14,
         // NSRunningApplication.activate is an advisory request the system
         // ignores from here, so it cannot move activation (or the menu bar)
         // by itself.
-        if entry.state == .otherSpace, let spaceID = entry.spaceID {
-            Spaces.switchTo(spaceID: spaceID)
+        if entry.state == .otherSpace {
+            if Dock.pressIcon(named: entry.appName) {
+                Log.write("dock press: \(entry.appName)")
+                return
+            }
+            Log.write("dock press failed for \(entry.appName), falling back to makeKey")
         }
         if app.isHidden {
             app.unhide()
