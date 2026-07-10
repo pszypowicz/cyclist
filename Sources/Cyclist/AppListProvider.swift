@@ -44,6 +44,7 @@ enum AppListProvider {
             case .hidden where !Settings.includeHidden: continue
             case .minimized where !Settings.includeMinimized: continue
             case .otherSpace where !Settings.includeOtherSpaces: continue
+            case .noWindows where !Settings.includeNoWindows: continue
             default: break
             }
             items.append(AppItem(

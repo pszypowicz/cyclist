@@ -8,11 +8,11 @@ A keyboard-driven, text-only app switcher for macOS. No thumbnails, no window sc
 
 - Replaces the native Cmd+Tab switcher with a vertical, text-only list of running apps in most-recently-used order.
 - A separate binding (Cmd+`) cycles through the windows of the frontmost app, including minimized ones - something the native window cycler skips.
-- Running apps with no open windows stay in the list; selecting one behaves like clicking its Dock icon, so the app reopens a window.
-- Three independent settings control what shows up in the list:
+- Four independent settings control what shows up in the list:
   - include **hidden** apps (Cmd+H)
   - include **minimized** apps (all windows in the Dock)
   - include apps whose windows live in **other Spaces** (including native fullscreen)
+  - include running apps with **no windows** at all (off by default; selecting one behaves like clicking its Dock icon, so the app reopens a window)
 
 ## Keybindings
 

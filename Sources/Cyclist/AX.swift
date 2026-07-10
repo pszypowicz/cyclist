@@ -17,7 +17,11 @@ enum AX {
         }
         return array.compactMap { item in
             guard CFGetTypeID(item) == AXUIElementGetTypeID() else { return nil }
-            return (item as! AXUIElement)
+            let element = item as! AXUIElement
+            // Finder reports the desktop as a full-screen AXScrollArea in its
+            // window list; only real AXWindow elements count.
+            guard string(element, kAXRoleAttribute) == kAXWindowRole as String else { return nil }
+            return element
         }
     }
 

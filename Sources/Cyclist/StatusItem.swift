@@ -15,6 +15,7 @@ final class StatusItemController: NSObject {
         menu.addItem(makeToggle(title: "Include hidden apps", key: Settings.includeHiddenKey))
         menu.addItem(makeToggle(title: "Include minimized apps", key: Settings.includeMinimizedKey))
         menu.addItem(makeToggle(title: "Include apps in other Spaces", key: Settings.includeOtherSpacesKey))
+        menu.addItem(makeToggle(title: "Include apps with no windows", key: Settings.includeNoWindowsKey))
         menu.addItem(.separator())
 
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
