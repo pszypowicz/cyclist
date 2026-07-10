@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SwitcherRow {
     let title: String
+    let subtitle: String?
     let annotation: String?
 }
 
@@ -20,8 +21,10 @@ struct SwitcherView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(model.rows.enumerated()), id: \.offset) { index, row in
                         HStack {
-                            Text(row.title)
+                            (Text(row.title).fontWeight(.semibold)
+                                + Text(row.subtitle.map { " - \($0)" } ?? ""))
                                 .lineLimit(1)
+                                .truncationMode(.tail)
                             Spacer(minLength: 12)
                             if let annotation = row.annotation {
                                 Text(annotation)
@@ -55,7 +58,7 @@ final class SwitcherPanel {
     private let model = SwitcherViewModel()
 
     private let rowHeight: CGFloat = 28
-    private let width: CGFloat = 360
+    private let width: CGFloat = 520
     private let maxHeight: CGFloat = 560
 
     init() {

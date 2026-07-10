@@ -6,7 +6,8 @@ A keyboard-driven, text-only app switcher for macOS. No thumbnails, no window sc
 
 ## What it does
 
-- Replaces the native Cmd+Tab switcher with a vertical, text-only list of running apps in most-recently-used order.
+- Replaces the native Cmd+Tab switcher with a vertical, text-only list in most-recently-used app order. Every window gets its own row (`App - Window title`), so two Safari windows are two entries.
+- Windows in other Spaces (including native fullscreen) appear as one row per Space, without a title: macOS reveals those titles only to apps holding Screen Recording permission, which Cyclist deliberately never requests. Selecting the row jumps straight to that Space.
 - A separate binding (Cmd+`) cycles through the windows of the frontmost app, including minimized ones - something the native window cycler skips.
 - Four independent settings control what shows up in the list:
   - include **hidden** apps (Cmd+H)

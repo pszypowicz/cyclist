@@ -10,7 +10,7 @@ final class SwitcherController {
     private let panel = SwitcherPanel()
 
     private enum Session {
-        case apps([AppItem], index: Int)
+        case apps([ListEntry], index: Int)
         case windows(NSRunningApplication, [WindowItem], index: Int)
     }
     private var session: Session?
@@ -74,10 +74,17 @@ final class SwitcherController {
         case nil:
             let items = AppListProvider.snapshot(mru: mru)
             guard !items.isEmpty else { return }
-            let start = startIndex(count: items.count, backward: backward)
+            // A quick tap should land on the previous app, not on another
+            // window of the frontmost app, whose windows head the MRU list.
+            let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            let firstOtherApp = items.firstIndex { $0.app.processIdentifier != front }
+            let forwardStart = firstOtherApp ?? (items.count > 1 ? 1 : 0)
+            let start = backward ? items.count - 1 : forwardStart
             session = .apps(items, index: start)
             presentPanel(
-                rows: items.map { SwitcherRow(title: $0.name, annotation: annotation(for: $0)) },
+                rows: items.map {
+                    SwitcherRow(title: $0.appName, subtitle: $0.windowTitle, annotation: annotation(for: $0))
+                },
                 selected: start
             )
         }
@@ -98,7 +105,9 @@ final class SwitcherController {
             let start = startIndex(count: items.count, backward: backward)
             session = .windows(app, items, index: start)
             presentPanel(
-                rows: items.map { SwitcherRow(title: $0.title, annotation: $0.isMinimized ? "minimized" : nil) },
+                rows: items.map {
+                    SwitcherRow(title: $0.title, subtitle: nil, annotation: $0.isMinimized ? "minimized" : nil)
+                },
                 selected: start
             )
         }
@@ -114,16 +123,13 @@ final class SwitcherController {
         return (index + (backward ? count - 1 : 1)) % count
     }
 
-    // Diagnostic window counts in every row are temporary scaffolding for the
-    // beta, to make state misclassifications visible in place.
-    private func annotation(for item: AppItem) -> String? {
-        let counts = "ax\(item.axWindowCount) cg\(item.cgWindowCount)"
-        switch item.state {
-        case .normal: return counts
-        case .hidden: return "hidden · \(counts)"
-        case .minimized: return "minimized · \(counts)"
-        case .otherSpace: return "other space · \(counts)"
-        case .noWindows: return "no windows · \(counts)"
+    private func annotation(for entry: ListEntry) -> String? {
+        switch entry.state {
+        case .normal: return nil
+        case .hidden: return "hidden"
+        case .minimized: return "minimized"
+        case .otherSpace: return "other space"
+        case .noWindows: return "no windows"
         }
     }
 
@@ -159,20 +165,12 @@ final class SwitcherController {
         }
     }
 
-    private func activate(_ item: AppItem) {
-        let app = item.app
-        if app.isHidden {
-            app.unhide()
-        }
-        if item.state == .minimized,
-           let window = AX.windows(pid: app.processIdentifier)
-               .first(where: { AX.bool($0, kAXMinimizedAttribute) == true }) {
-            AX.setBool(window, kAXMinimizedAttribute, false)
-        }
+    private func activate(_ entry: ListEntry) {
+        let app = entry.app
         // Plain activation does nothing visible for an app with no windows.
         // Launching it again is Dock-click semantics: the app gets a reopen
         // event and recreates its window.
-        if item.state == .noWindows, let url = app.bundleURL {
+        if entry.state == .noWindows, let url = app.bundleURL {
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
@@ -180,8 +178,17 @@ final class SwitcherController {
         }
         // Activation alone never switches Spaces (the Dock does that part for
         // the native switcher), so jump to the window's Space first.
-        if item.state == .otherSpace, let spaceID = item.otherSpaceID {
+        if entry.state == .otherSpace, let spaceID = entry.spaceID {
             Spaces.switchTo(spaceID: spaceID)
+        }
+        if app.isHidden {
+            app.unhide()
+        }
+        if let window = entry.axWindow {
+            if AX.bool(window, kAXMinimizedAttribute) == true {
+                AX.setBool(window, kAXMinimizedAttribute, false)
+            }
+            AX.raise(window)
         }
         app.activate(options: [.activateIgnoringOtherApps])
     }

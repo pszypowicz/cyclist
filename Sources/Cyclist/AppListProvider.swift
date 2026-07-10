@@ -1,91 +1,105 @@
 import AppKit
 import ApplicationServices
 
-enum AppState {
+enum EntryState {
     case normal
+    case minimized
     case hidden
-    case minimized   // has windows and all of them are minimized
-    case otherSpace  // no windows reachable via AX, but owns real windows somewhere
-    case noWindows   // running with no real windows anywhere
+    case otherSpace  // a real window on a Space that is not currently visible
+    case noWindows   // running app with no real windows anywhere
 }
 
-struct AppItem {
+// One row of the switcher: a single window of an app, one other-Space
+// destination of an app, or a windowless app.
+struct ListEntry {
     let app: NSRunningApplication
-    let name: String
-    let state: AppState
-    let axWindowCount: Int
-    let cgWindowCount: Int
-    // Space holding the app's window when state is otherSpace.
-    let otherSpaceID: UInt64?
+    let appName: String
+    let windowTitle: String?
+    let state: EntryState
+    let axWindow: AXUIElement?  // set for normal/minimized/hidden rows
+    let spaceID: UInt64?        // set for otherSpace rows
 }
 
-// Builds the app list for a switcher session: all regular apps, classified
-// and filtered by the hidden/minimized/other-Spaces settings, in MRU order.
+// Builds the switcher list: every window of every regular app, in app MRU
+// order, filtered by the hidden/minimized/other-Spaces/no-windows settings.
 //
-// Classification without Screen Recording permission:
-// - hidden comes straight from NSRunningApplication
-// - minimized is derived from the AXMinimized attribute of the app's windows
-// - other Spaces is inferred: the AX API cannot see windows in other Spaces,
-//   so an app with no AX windows that owns a window assigned to a Space that
-//   is not currently visible has that window elsewhere (another Space or a
-//   native fullscreen Space). Space membership has to come from private CGS
-//   calls; apps also keep phantom windows alive after their last real window
-//   closes, and those are either Space-less or sit on the visible Space where
-//   AX would have seen a real one.
+// Windows in the current Space (plus minimized ones, and windows of hidden
+// apps) come from the AX API with their titles. Windows in other Spaces are
+// invisible to AX and macOS only reveals their titles to Screen Recording
+// holders, so they are represented as one title-less row per Space, resolved
+// through the private CGS Space membership calls.
 enum AppListProvider {
-    static func snapshot(mru: MRUTracker) -> [AppItem] {
+    static func snapshot(mru: MRUTracker) -> [ListEntry] {
         let cgWindows = cgWindowIDs()
         let visibleSpaces = Spaces.visibleSpaceIDs()
-        var items: [AppItem] = []
-        for app in NSWorkspace.shared.runningApplications {
-            guard app.activationPolicy == .regular, !app.isTerminated else { continue }
-            guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { continue }
-            let windowIDs = cgWindows[app.processIdentifier] ?? []
-            let (state, axCount, otherSpaceID) = classify(app: app, windowIDs: windowIDs, visibleSpaces: visibleSpaces)
-            switch state {
-            case .hidden where !Settings.includeHidden: continue
-            case .minimized where !Settings.includeMinimized: continue
-            case .otherSpace where !Settings.includeOtherSpaces: continue
-            case .noWindows where !Settings.includeNoWindows: continue
-            default: break
-            }
-            items.append(AppItem(
-                app: app,
-                name: app.localizedName ?? "Unknown",
-                state: state,
-                axWindowCount: axCount,
-                cgWindowCount: windowIDs.count,
-                otherSpaceID: otherSpaceID
-            ))
-        }
-        items.sort {
-            mru.position(of: $0.app.processIdentifier) < mru.position(of: $1.app.processIdentifier)
-        }
-        return items
-    }
 
-    private static func classify(
-        app: NSRunningApplication,
-        windowIDs: [Int],
-        visibleSpaces: Set<UInt64>
-    ) -> (AppState, Int, UInt64?) {
-        let windows = AX.windows(pid: app.processIdentifier)
-        if app.isHidden { return (.hidden, windows.count, nil) }
-        if windows.isEmpty {
-            // A window on a Space that is not currently visible is genuinely
-            // elsewhere. Space-less windows and windows sitting on the visible
-            // Space (where AX would have seen a real one) are phantoms left
-            // behind by closed windows.
-            for id in windowIDs {
-                let spaces = Spaces.spaceIDs(ofWindow: id)
-                if let space = spaces.first, spaces.isDisjoint(with: visibleSpaces) {
-                    return (.otherSpace, 0, space)
-                }
-            }
-            return (.noWindows, 0, nil)
+        let apps = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && !$0.isTerminated
+                && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+        }.sorted {
+            mru.position(of: $0.processIdentifier) < mru.position(of: $1.processIdentifier)
         }
-        let allMinimized = windows.allSatisfy { AX.bool($0, kAXMinimizedAttribute) == true }
-        return (allMinimized ? .minimized : .normal, windows.count, nil)
+
+        var entries: [ListEntry] = []
+        for app in apps {
+            let hidden = app.isHidden
+            if hidden && !Settings.includeHidden { continue }
+            let name = app.localizedName ?? "Unknown"
+            var appEntries: [ListEntry] = []
+            var hasAnyWindow = false
+
+            for window in AX.windows(pid: app.processIdentifier) {
+                if let subrole = AX.string(window, kAXSubroleAttribute) {
+                    guard subrole == kAXStandardWindowSubrole as String
+                            || subrole == kAXDialogSubrole as String else { continue }
+                }
+                hasAnyWindow = true
+                let minimized = AX.bool(window, kAXMinimizedAttribute) == true
+                let state: EntryState = hidden ? .hidden : (minimized ? .minimized : .normal)
+                if state == .minimized && !Settings.includeMinimized { continue }
+                let title = AX.string(window, kAXTitleAttribute) ?? ""
+                appEntries.append(ListEntry(
+                    app: app,
+                    appName: name,
+                    windowTitle: title.isEmpty ? nil : title,
+                    state: state,
+                    axWindow: window,
+                    spaceID: nil
+                ))
+            }
+
+            // One row per Space that holds windows of this app elsewhere.
+            var seenSpaces: Set<UInt64> = []
+            for windowID in cgWindows[app.processIdentifier] ?? [] {
+                let spaces = Spaces.spaceIDs(ofWindow: windowID)
+                guard let space = spaces.first, spaces.isDisjoint(with: visibleSpaces),
+                      !seenSpaces.contains(space) else { continue }
+                seenSpaces.insert(space)
+                hasAnyWindow = true
+                guard Settings.includeOtherSpaces else { continue }
+                appEntries.append(ListEntry(
+                    app: app,
+                    appName: name,
+                    windowTitle: nil,
+                    state: .otherSpace,
+                    axWindow: nil,
+                    spaceID: space
+                ))
+            }
+
+            if !hasAnyWindow && Settings.includeNoWindows {
+                appEntries.append(ListEntry(
+                    app: app,
+                    appName: name,
+                    windowTitle: nil,
+                    state: .noWindows,
+                    axWindow: nil,
+                    spaceID: nil
+                ))
+            }
+            entries.append(contentsOf: appEntries)
+        }
+        return entries
     }
 
     private static func cgWindowIDs() -> [pid_t: [Int]] {
@@ -96,13 +110,14 @@ enum AppListProvider {
         var ids: [pid_t: [Int]] = [:]
         for info in list {
             // Layer 0 alone is not enough: apps keep invisible bookkeeping
-            // windows there (menu bar sized strips, cached Electron shells).
-            // Require visible alpha and a plausibly user-sized frame.
+            // windows there (menu bar sized strips, cached Electron shells,
+            // the ~52pt fullscreen toolbar hover strip). Require visible alpha
+            // and a plausibly user-sized frame.
             guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
                   let alpha = info[kCGWindowAlpha as String] as? Double, alpha > 0,
                   let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
                   let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
-                  bounds.width >= 100, bounds.height >= 50,
+                  bounds.width >= 100, bounds.height >= 80,
                   let windowID = info[kCGWindowNumber as String] as? Int,
                   let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
             ids[pid, default: []].append(windowID)
