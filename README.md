@@ -51,10 +51,6 @@ Cyclist also exposes its instant Space-switching engine as a CLI for other tools
 
 The build script signs with your "Apple Development" certificate when one is present so the Accessibility grant survives rebuilds. See `scripts/build-app.sh --help` for options.
 
-## AeroSpace
-
-Cyclist works well alongside [AeroSpace](https://github.com/nikitabobko/AeroSpace) without knowing anything about it. AeroSpace emulates workspaces within a single macOS Space, so every window is visible to Cyclist regardless of workspace, and activating a window in another workspace makes AeroSpace follow focus there automatically - Cmd+Tab therefore crosses workspaces for free. Space navigation (Ctrl+Arrow, 3-finger swipe) covers the native Spaces; workspace switching stays with AeroSpace's own bindings. AeroSpace is not required.
-
 ## Known limitations
 
 - Switching to a window in another Space (including native fullscreen) jumps there near-instantly by posting synthetic high-velocity trackpad swipe gestures, the technique shared by Space Rabbit, InstantSpaceSwitcher, and Spaceman - macOS performs no Space transition for plain app activation, and the animated route takes over a second per Space. The jump is verified and retried a few times; if a future macOS breaks the gesture encoding entirely, cross-Space switching stops working until the encoding is updated.
