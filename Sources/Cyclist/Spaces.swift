@@ -120,33 +120,29 @@ enum Spaces {
     // keeps compositing underneath the new one, and once desynchronized even
     // native transitions stop working until the WindowServer state resets.
 
-    // Navigate to a Space the native way: synthesize the Mission Control
-    // "Move left/right a space" shortcut (Ctrl+Arrow) for the number of steps
-    // between the current and target position in the display's Space order.
-    // Activating an app never transitions into an existing fullscreen Space
-    // (native Cmd+Tab does not either), so keystrokes handled by the Dock are
-    // the only safe route in, animation included. Requires those Mission
-    // Control shortcuts to remain enabled.
-    static func navigate(to spaceID: UInt64) -> Bool {
+    // Space order and current Space of the display containing the given
+    // Space, for step-by-step navigation.
+    static func orderInfo(containing spaceID: UInt64) -> (order: [UInt64], current: UInt64)? {
         guard let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID())?
-            .takeRetainedValue() as? [[String: Any]] else { return false }
+            .takeRetainedValue() as? [[String: Any]] else { return nil }
         for display in displays {
             guard let spaces = display["Spaces"] as? [[String: Any]],
                   let current = (display["Current Space"] as? [String: Any])?["id64"] as? UInt64
             else { continue }
             let ids = spaces.compactMap { $0["id64"] as? UInt64 }
-            guard let targetIndex = ids.firstIndex(of: spaceID) else { continue }
-            guard let currentIndex = ids.firstIndex(of: current) else { return false }
-            let steps = targetIndex - currentIndex
-            for _ in 0..<abs(steps) {
-                postCtrlArrow(right: steps > 0)
+            if ids.contains(spaceID) {
+                return (ids, current)
             }
-            return true
         }
-        return false
+        return nil
     }
 
-    private static func postCtrlArrow(right: Bool) {
+    // One press of the Mission Control "Move left/right a space" shortcut.
+    // Keystrokes handled by the Dock are the only safe route into an
+    // existing fullscreen Space (plain app activation never transitions
+    // there, native Cmd+Tab included), and they carry the native animation.
+    // Requires those Mission Control shortcuts to remain enabled.
+    static func postCtrlArrow(right: Bool) {
         let keyCode: CGKeyCode = right ? 124 : 123
         for down in [true, false] {
             guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: down) else { continue }

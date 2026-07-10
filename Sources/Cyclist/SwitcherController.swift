@@ -8,6 +8,7 @@ final class SwitcherController {
     private let tap = EventTap()
     private let mru: MRUTracker
     private let panel = SwitcherPanel()
+    private let navigator = SpaceNavigator()
 
     private enum Session {
         case apps([ListEntry], index: Int)
@@ -169,6 +170,8 @@ final class SwitcherController {
 
     private func activate(_ entry: ListEntry) {
         let app = entry.app
+        // A newer activation supersedes any Space navigation still in flight.
+        navigator.cancel()
         Log.write("activate: app=\(entry.appName) state=\(entry.state)"
             + " windowID=\(entry.windowID.map(String.init) ?? "-")"
             + " spaceID=\(entry.spaceID.map(String.init) ?? "-")"
@@ -191,11 +194,9 @@ final class SwitcherController {
         // an advisory request the system ignores from here, so it cannot
         // move activation (or the menu bar) by itself.
         if entry.state == .otherSpace {
-            if let spaceID = entry.spaceID, Spaces.navigate(to: spaceID) {
+            if let spaceID = entry.spaceID,
+               navigator.begin(to: spaceID, focusPid: app.processIdentifier, windowID: entry.windowID) {
                 Log.write("navigate: \(entry.appName) space=\(spaceID)")
-                if let windowID = entry.windowID {
-                    Spaces.makeKey(pid: app.processIdentifier, windowID: windowID)
-                }
                 return
             }
             if Dock.pressIcon(named: entry.appName) {
