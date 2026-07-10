@@ -15,7 +15,6 @@ final class SwitcherController {
     }
     private var session: Session?
     private var showPanelWork: DispatchWorkItem?
-    private var pendingFocusWork: DispatchWorkItem?
 
     private let tabKey: Int64 = 48
     private let graveKey: Int64 = 50
@@ -183,36 +182,15 @@ final class SwitcherController {
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
             return
         }
-        // Activation alone never switches Spaces (the Dock does that part for
-        // the native switcher), so jump to the window's Space, then make the
-        // target window key once the switch has settled; without that step
-        // the WindowServer is left half-switched, still compositing the old
-        // fullscreen Space with a stale menu bar.
-        if entry.state == .otherSpace, let spaceID = entry.spaceID {
+        // Switching the current Space and making the target window key are
+        // separate WindowServer operations; neither implies the other, so do
+        // both, synchronously and in this order. Without the key window the
+        // old fullscreen Space keeps compositing underneath and the menu bar
+        // keeps naming the previous app.
+        if entry.state == .otherSpace, let spaceID = entry.spaceID, let windowID = entry.windowID {
             Spaces.switchTo(spaceID: spaceID)
-            if let windowID = entry.windowID {
-                let pid = app.processIdentifier
-                let previousFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
-                pendingFocusWork?.cancel()
-                let work = DispatchWorkItem {
-                    Spaces.makeKey(pid: pid, windowID: windowID)
-                    app.activate(options: [.activateIgnoringOtherApps])
-                }
-                pendingFocusWork = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
-                // Self-heal: if focus never moved off the app we came from,
-                // the transition did not take; fire the focus once more.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    let front = NSWorkspace.shared.frontmostApplication
-                    if front?.processIdentifier != pid, front?.processIdentifier == previousFront {
-                        Log.write("focus retry: frontmost=\(front?.localizedName ?? "?")"
-                            + " expected=\(app.localizedName ?? "?")")
-                        Spaces.makeKey(pid: pid, windowID: windowID)
-                        app.activate(options: [.activateIgnoringOtherApps])
-                    }
-                }
-                return
-            }
+            Spaces.makeKey(pid: app.processIdentifier, windowID: windowID)
+            return
         }
         if app.isHidden {
             app.unhide()

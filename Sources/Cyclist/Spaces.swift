@@ -68,12 +68,17 @@ enum Spaces {
         return result
     }
 
-    // Make a specific window key through the WindowServer, the same way
-    // AltTab and yabai focus windows. Activating the app alone after a Space
-    // change leaves the WindowServer half-switched: the previous fullscreen
-    // Space keeps compositing underneath and the menu bar still names the
-    // old app. The 0xf8-byte records are synthesized window-server focus
-    // events; 0x01/0x02 are their activate/deactivate variants.
+    // Make a specific window key through the WindowServer: front the process
+    // with the target window, then post a synthetic left mouse down/up pair
+    // addressed to the window by id, aimed just outside its frame so nothing
+    // is actually clicked. Activating the app alone cannot do this (macOS 14
+    // downgraded NSRunningApplication.activate to an advisory request), and
+    // without a key window the menu bar keeps naming the previous app.
+    // The record layout follows CGSInternal's CGSEvent.h as used by AltTab
+    // and yabai: 0x04 record length, 0x08 event type, 0x20 window-relative
+    // click point, 0x3a undocumented flag, 0x3c target window id. The buffer
+    // is 0x100 although the record says 0xf8: the WindowServer reads past
+    // the record on macOS 14.7.4+ and crashes on a tight allocation.
     static func makeKey(pid: pid_t, windowID: Int) {
         guard let setFront = SLPSSetFrontProcessWithOptions,
               let postEvent = SLPSPostEventRecordTo,
@@ -87,17 +92,18 @@ enum Spaces {
             Log.write("makeKey: GetProcessForPID(\(pid)) failed: \(psnErr)")
             return
         }
-        let wid = UInt32(windowID)
+        var wid = UInt32(windowID)
         let frontErr = setFront(&psn, wid, 0x200)  // kCPSUserGenerated
         Log.write("makeKey: pid=\(pid) wid=\(wid) setFront=\(frontErr)")
-        var bytes = [UInt8](repeating: 0, count: 0xf8)
+        var point = CGPoint(x: -1, y: -1)
+        var bytes = [UInt8](repeating: 0, count: 0x100)
         bytes[0x04] = 0xf8
         bytes[0x3a] = 0x10
-        withUnsafeBytes(of: wid) { for i in 0..<4 { bytes[0x3c + i] = $0[i] } }
-        for i in 0x20..<0x30 { bytes[i] = 0xff }
-        bytes[0x08] = 0x01
+        memcpy(&bytes[0x3c], &wid, MemoryLayout<UInt32>.size)
+        memcpy(&bytes[0x20], &point, MemoryLayout<CGPoint>.size)
+        bytes[0x08] = 0x01  // kCGEventLeftMouseDown
         _ = postEvent(&psn, &bytes)
-        bytes[0x08] = 0x02
+        bytes[0x08] = 0x02  // kCGEventLeftMouseUp
         _ = postEvent(&psn, &bytes)
     }
 
