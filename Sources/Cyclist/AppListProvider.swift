@@ -30,6 +30,17 @@ struct ListEntry {
 // holders, so they are represented as one title-less row per Space, resolved
 // through the private per-Space window lists.
 enum AppListProvider {
+    // Titles of windows in other Spaces are unreadable without Screen
+    // Recording permission, but most windows were visible at some point:
+    // remember titles by window id whenever AX can see them and reuse them
+    // for other-Space rows. A title can lag behind a rename that happens
+    // while the window is away.
+    private static var titleCache: [Int: String] = [:]
+
+    static func cacheTitle(_ title: String, windowID: Int) {
+        titleCache[windowID] = title
+    }
+
     static func snapshot(mru: MRUTracker) -> [ListEntry] {
         let cgWindows = cgWindowIDs()
         let otherSpaceWindows = Spaces.windowsByNonVisibleSpace()
@@ -60,6 +71,10 @@ enum AppListProvider {
                 let state: EntryState = hidden ? .hidden : (minimized ? .minimized : .normal)
                 if state == .minimized && !Settings.includeMinimized { continue }
                 let title = AX.string(window, kAXTitleAttribute) ?? ""
+                let windowID = AX.windowID(of: window)
+                if let windowID, !title.isEmpty {
+                    titleCache[windowID] = title
+                }
                 appEntries.append(ListEntry(
                     app: app,
                     appName: name,
@@ -67,7 +82,7 @@ enum AppListProvider {
                     state: state,
                     axWindow: window,
                     spaceID: nil,
-                    windowID: AX.windowID(of: window)
+                    windowID: windowID
                 ))
             }
 
@@ -75,13 +90,15 @@ enum AppListProvider {
             // a window of this app.
             let appWindowIDs = cgWindows[app.processIdentifier] ?? []
             for (space, windowIDs) in otherSpaceWindows {
-                guard let windowID = appWindowIDs.first(where: { windowIDs.contains($0) }) else { continue }
+                let candidates = appWindowIDs.filter { windowIDs.contains($0) }
+                guard !candidates.isEmpty else { continue }
                 hasAnyWindow = true
                 guard Settings.includeOtherSpaces else { continue }
+                let windowID = candidates.first { titleCache[$0] != nil } ?? candidates[0]
                 appEntries.append(ListEntry(
                     app: app,
                     appName: name,
-                    windowTitle: nil,
+                    windowTitle: titleCache[windowID],
                     state: .otherSpace,
                     axWindow: nil,
                     spaceID: space,

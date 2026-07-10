@@ -22,11 +22,15 @@ enum WindowListProvider {
             let minimized = AX.bool(window, kAXMinimizedAttribute) == true
             if minimized && !Settings.includeMinimized { continue }
             let title = AX.string(window, kAXTitleAttribute) ?? ""
+            let windowID = AX.windowID(of: window)
+            if let windowID, !title.isEmpty {
+                AppListProvider.cacheTitle(title, windowID: windowID)
+            }
             items.append(WindowItem(
                 element: window,
                 title: title.isEmpty ? (app.localizedName ?? "Untitled") : title,
                 isMinimized: minimized,
-                windowID: AX.windowID(of: window)
+                windowID: windowID
             ))
         }
         return items
