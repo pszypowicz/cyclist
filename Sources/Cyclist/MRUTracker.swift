@@ -30,6 +30,10 @@ final class MRUTracker {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         order.removeAll { $0 == app.processIdentifier }
         order.insert(app.processIdentifier, at: 0)
+        // By activation time the app's windows are AX-visible even when the
+        // activation came from arriving in a fullscreen Space, where the
+        // navigator's own arrival harvest still races AX exposure.
+        AppListProvider.harvestTitles()
     }
 
     @objc private func didTerminate(_ note: Notification) {
