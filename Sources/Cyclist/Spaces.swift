@@ -145,33 +145,57 @@ enum Spaces {
         return nil
     }
 
-    // Instant Space switch: a synthetic trackpad dock-swipe with high
-    // velocity, the technique behind InstantSpaceSwitcher, iss, and
-    // Spaceman. The Dock treats it as a completed swipe and switches with
-    // no animation (~40ms observed). Uses undocumented CGEvent field
-    // indices, posted through the public CGEventPost. macOS refuses these
-    // between two fullscreen Spaces, so the navigator falls back to the
-    // arrow shortcut for those hops.
-    static func postDockSwipe(right: Bool) {
-        let eventTypeField = CGEventField(rawValue: 55)!    // real CGS event type
-        let gestureHIDTypeField = CGEventField(rawValue: 110)!
+    // Instant Space switch: synthetic trackpad dock-swipe gestures with
+    // high velocity, so the Dock switches with no animation (~40ms
+    // observed). Undocumented CGEvent field indices posted through the
+    // public CGEventPost; the exact encoding follows Space Rabbit
+    // (github.com/Tahul/space-rabbit): direction as a plain 0/1 integer in
+    // the flag-bits field, Began+Ended phases only, progress and velocity
+    // on Ended, and one gesture pair per step with velocity scaled by the
+    // step count. Unlike the iss/Spaceman float-bit-pattern encoding, this
+    // shape also switches between two fullscreen Spaces and chains
+    // multi-step jumps with no delay.
+    static func postDockSwipes(right: Bool, steps: Int) {
+        let eventTypeField = CGEventField(rawValue: 55)!       // real CGS event type
+        let gestureHIDTypeField = CGEventField(rawValue: 110)! // IOHIDEventType
+        let scrollYField = CGEventField(rawValue: 119)!
         let swipeMotionField = CGEventField(rawValue: 123)!
         let swipeProgressField = CGEventField(rawValue: 124)!
         let swipeVelocityXField = CGEventField(rawValue: 129)!
         let swipeVelocityYField = CGEventField(rawValue: 130)!
         let gesturePhaseField = CGEventField(rawValue: 132)!
-        let progress = right ? Double(Float.leastNonzeroMagnitude) : -Double(Float.leastNonzeroMagnitude)
-        let velocity = right ? 2000.0 : -2000.0
-        for phase: Int64 in [1, 2, 4] {  // began, changed, ended
-            guard let event = CGEvent(source: nil) else { continue }
-            event.setIntegerValueField(eventTypeField, value: 30)   // DockControl
-            event.setIntegerValueField(gestureHIDTypeField, value: 23)  // dock swipe
-            event.setIntegerValueField(gesturePhaseField, value: phase)
-            event.setDoubleValueField(swipeProgressField, value: progress)
-            event.setIntegerValueField(swipeMotionField, value: 1)  // horizontal
-            event.setDoubleValueField(swipeVelocityXField, value: velocity)
-            event.setDoubleValueField(swipeVelocityYField, value: velocity)
-            event.post(tap: .cgSessionEventTap)
+        let flagBitsField = CGEventField(rawValue: 135)!
+        let zoomDeltaXField = CGEventField(rawValue: 139)!
+
+        let count = max(1, steps)
+        let flagDirection: Int64 = right ? 1 : 0
+        let progress = right ? 2.0 : -2.0
+        let velocity = (right ? 400.0 : -400.0) * Double(count)
+
+        func postPair(phase: Int64) {
+            guard let dockEvent = CGEvent(source: nil),
+                  let gestureEvent = CGEvent(source: nil) else { return }
+            dockEvent.setIntegerValueField(eventTypeField, value: 30)      // DockControl
+            dockEvent.setIntegerValueField(gestureHIDTypeField, value: 23) // dock swipe
+            dockEvent.setIntegerValueField(gesturePhaseField, value: phase)
+            dockEvent.setIntegerValueField(flagBitsField, value: flagDirection)
+            dockEvent.setIntegerValueField(swipeMotionField, value: 1)     // horizontal
+            dockEvent.setDoubleValueField(scrollYField, value: 0)
+            // A zero zoom delta makes the Dock discard the event as a no-op.
+            dockEvent.setDoubleValueField(zoomDeltaXField, value: Double(Float.leastNonzeroMagnitude))
+            if phase == 4 {  // ended: the phase where the Dock decides to snap
+                dockEvent.setDoubleValueField(swipeProgressField, value: progress)
+                dockEvent.setDoubleValueField(swipeVelocityXField, value: velocity)
+                dockEvent.setDoubleValueField(swipeVelocityYField, value: 0)
+            }
+            gestureEvent.setIntegerValueField(eventTypeField, value: 29)   // gesture envelope
+            dockEvent.post(tap: .cgSessionEventTap)
+            gestureEvent.post(tap: .cgSessionEventTap)
+        }
+
+        for _ in 0..<count {
+            postPair(phase: 1)  // began
+            postPair(phase: 4)  // ended
         }
     }
 

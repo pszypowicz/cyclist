@@ -52,7 +52,7 @@ Cyclist works well alongside [AeroSpace](https://github.com/nikitabobko/AeroSpac
 
 ## Known limitations
 
-- Switching to a window in another Space (including native fullscreen) navigates there by synthesizing the Mission Control "Move left/right a space" shortcut, because macOS performs no Space transition for plain app activation. Keep those shortcuts enabled (System Settings > Keyboard > Keyboard Shortcuts > Mission Control); without them Cyclist falls back to a Dock-style activation, which reaches regular Spaces but not fullscreen ones.
+- Switching to a window in another Space (including native fullscreen) jumps there near-instantly by posting synthetic high-velocity trackpad swipe gestures, the technique shared by Space Rabbit, InstantSpaceSwitcher, and Spaceman - macOS performs no Space transition for plain app activation, and the animated route takes over a second per Space. If a future macOS breaks the gesture encoding, Cyclist falls back to the Mission Control "Move left/right a space" shortcut automatically, so keeping those shortcuts enabled is recommended (System Settings > Keyboard > Keyboard Shortcuts > Mission Control).
 
 - While a password field has secure input enabled, macOS withholds keystrokes from event taps, so Cmd+Tab temporarily falls through to the native switcher.
 - Same-app window cycling covers windows in the current Space plus minimized ones; the Accessibility API cannot see individual windows parked in other Spaces (app-level switching still reaches those apps).

@@ -1,31 +1,30 @@
 import AppKit
 
-// Walks to a target Space one hop at a time, choosing the fastest native
-// mechanism per hop:
+// Takes the frontmost route to a target Space:
 //
-// - Synthetic dock-swipe: instant (~40ms, no animation). The Dock refuses
-//   it between two fullscreen Spaces, so those hops are predicted from the
-//   Space types and use the arrow shortcut directly.
-// - Mission Control arrow shortcut: animated (~1s), universally accepted,
-//   but drops any press that arrives during a running animation - physical
-//   presses included - so arrow hops are paced to the animation duration.
+// 1. Direct jump: synthetic dock-swipe gestures (~40ms, no animation, any
+//    distance, fullscreen Spaces included). Verified shortly after firing.
+// 2. Fallback: the Mission Control arrow shortcut, one hop at a time. It
+//    plays the full animation and drops any press that arrives while one
+//    is running - physical presses included - so arrow hops are paced to
+//    the animation duration. Covers a future macOS breaking the gesture
+//    encoding; three stalled steps abort the walk (covers the Mission
+//    Control shortcuts being disabled too).
 //
-// Each step recomputes the remaining distance from the real Space state
-// before acting, so nothing is fired blind; a hop that makes no progress
-// falls back to the arrow, and three stalled steps abort the walk (covers
-// the Mission Control shortcuts being disabled). On verified arrival the
-// target window is made key.
+// Every step recomputes the remaining distance from the real Space state
+// before acting, and on verified arrival the target window is made key.
 //
 // activeSpaceDidChangeNotification is deliberately not used: it fires while
 // a transition is in flight, when the reported current Space can be garbage
 // (it once read as an unrelated Space and faked an arrival mid-route).
 final class SpaceNavigator {
-    private let swipeInterval: TimeInterval = 0.35
+    private let swipeVerifyInterval: TimeInterval = 0.4
     private let arrowInterval: TimeInterval = 1.25
 
     private var target: UInt64?
     private var focus: (pid: pid_t, windowID: Int)?
     private var stepWork: DispatchWorkItem?
+    private var triedSwipe = false
     private var lastCurrent: UInt64?
     private var stalls = 0
 
@@ -44,6 +43,7 @@ final class SpaceNavigator {
         stepWork = nil
         target = nil
         focus = nil
+        triedSwipe = false
         lastCurrent = nil
         stalls = 0
     }
@@ -65,8 +65,7 @@ final class SpaceNavigator {
             return
         }
 
-        let noProgress = lastCurrent == info.current
-        if noProgress {
+        if lastCurrent == info.current {
             stalls += 1
             if stalls >= 3 {
                 Log.write("navigator gave up: stalled at space=\(info.current) target=\(target)")
@@ -79,20 +78,22 @@ final class SpaceNavigator {
         lastCurrent = info.current
 
         let right = targetIndex > currentIndex
-        let next = info.order[currentIndex + (right ? 1 : -1)]
-        let fullscreenToFullscreen = info.types[info.current] == Spaces.fullscreenSpaceType
-            && info.types[next] == Spaces.fullscreenSpaceType
-        let useArrow = fullscreenToFullscreen || noProgress
-
-        Log.write("navigator step (\(useArrow ? "arrow" : "swipe")): \(info.current) -> \(next)")
-        if useArrow {
-            Spaces.postCtrlArrow(right: right)
+        let distance = abs(targetIndex - currentIndex)
+        if !triedSwipe {
+            triedSwipe = true
+            Log.write("navigator jump (swipe x\(distance)): \(info.current) -> \(target)")
+            Spaces.postDockSwipes(right: right, steps: distance)
+            schedule(after: swipeVerifyInterval)
         } else {
-            Spaces.postDockSwipe(right: right)
+            Log.write("navigator step (arrow): \(info.current) toward \(target)")
+            Spaces.postCtrlArrow(right: right)
+            schedule(after: arrowInterval)
         }
+    }
+
+    private func schedule(after interval: TimeInterval) {
         let work = DispatchWorkItem { [weak self] in self?.step() }
         stepWork = work
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + (useArrow ? arrowInterval : swipeInterval), execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval, execute: work)
     }
 }
