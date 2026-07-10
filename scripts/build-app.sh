@@ -49,7 +49,9 @@ bin="$(swift build --configuration "$configuration" --show-bin-path)/Cyclist"
 app="$output/Cyclist.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/Resources"
 cp Resources/Info.plist "$app/Contents/Info.plist"
+cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 cp "$bin" "$app/Contents/MacOS/Cyclist"
 
 if [[ "$identity" == "adhoc" ]]; then
