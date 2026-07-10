@@ -60,7 +60,7 @@ struct SwitcherView: View {
 // Non-activating borderless panel: it must never become the active app, or
 // the MRU order (and "previous app" quick switching) would corrupt itself.
 final class SwitcherPanel {
-    private let panel: NSPanel
+    private var panel: NSPanel
     private let model = SwitcherViewModel()
 
     private let rowHeight: CGFloat = 28
@@ -68,7 +68,24 @@ final class SwitcherPanel {
     private let maxHeight: CGFloat = 560
 
     init() {
-        panel = NSPanel(
+        panel = Self.makePanel(model: model)
+        // After a display disconnect the long-lived panel stays ordered in
+        // and correctly framed but the WindowServer stops compositing it
+        // (onscreen=false) - the switcher silently vanishes. Rebuild the
+        // window whenever the screen topology changes.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Log.write("panel: screen parameters changed, rebuilding")
+            self.panel.orderOut(nil)
+            self.panel = Self.makePanel(model: self.model)
+        }
+    }
+
+    private static func makePanel(model: SwitcherViewModel) -> NSPanel {
+        let panel = NSPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -83,6 +100,7 @@ final class SwitcherPanel {
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.contentView = NSHostingView(rootView: SwitcherView(model: model))
+        return panel
     }
 
     func setRows(_ rows: [SwitcherRow], selected: Int) {
