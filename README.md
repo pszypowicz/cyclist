@@ -1,6 +1,6 @@
 # Cyclist
 
-A keyboard-driven, text-only app switcher for macOS. No thumbnails, no window screenshots - just a list of app names you cycle through with Cmd+Tab.
+A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots - just a list of app icons, names, and window titles you cycle through with Cmd+Tab.
 
 > **Beta.** Cyclist is in early development (0.x). Expect rough edges, hardcoded shortcuts, and breaking changes between releases.
 

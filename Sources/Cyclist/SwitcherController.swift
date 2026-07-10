@@ -83,7 +83,8 @@ final class SwitcherController {
             session = .apps(items, index: start)
             presentPanel(
                 rows: items.map {
-                    SwitcherRow(title: $0.appName, subtitle: $0.windowTitle, annotation: annotation(for: $0))
+                    SwitcherRow(icon: $0.app.icon, title: $0.appName, subtitle: $0.windowTitle,
+                                annotation: annotation(for: $0))
                 },
                 selected: start
             )
@@ -106,7 +107,8 @@ final class SwitcherController {
             session = .windows(app, items, index: start)
             presentPanel(
                 rows: items.map {
-                    SwitcherRow(title: $0.title, subtitle: nil, annotation: $0.isMinimized ? "minimized" : nil)
+                    SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
+                                annotation: $0.isMinimized ? "minimized" : nil)
                 },
                 selected: start
             )

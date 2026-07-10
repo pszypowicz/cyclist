@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct SwitcherRow {
+    let icon: NSImage?
     let title: String
     let subtitle: String?
     let annotation: String?
@@ -21,6 +22,11 @@ struct SwitcherView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(model.rows.enumerated()), id: \.offset) { index, row in
                         HStack {
+                            if let icon = row.icon {
+                                Image(nsImage: icon)
+                                    .resizable()
+                                    .frame(width: 18, height: 18)
+                            }
                             (Text(row.title).fontWeight(.semibold)
                                 + Text(row.subtitle.map { " - \($0)" } ?? ""))
                                 .lineLimit(1)
