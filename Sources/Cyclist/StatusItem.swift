@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
@@ -16,6 +17,12 @@ final class StatusItemController: NSObject {
         menu.addItem(makeToggle(title: "Include minimized apps", key: Settings.includeMinimizedKey))
         menu.addItem(makeToggle(title: "Include apps in other Spaces", key: Settings.includeOtherSpacesKey))
         menu.addItem(makeToggle(title: "Include apps with no windows", key: Settings.includeNoWindowsKey))
+        menu.addItem(.separator())
+
+        let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
+        loginItem.target = self
+        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(loginItem)
         menu.addItem(.separator())
 
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
@@ -44,5 +51,20 @@ final class StatusItemController: NSObject {
         let newValue = !UserDefaults.standard.bool(forKey: key)
         UserDefaults.standard.set(newValue, forKey: key)
         sender.state = newValue ? .on : .off
+    }
+
+    // Native login item via SMAppService: the app appears in System
+    // Settings > General > Login Items and macOS owns the launch.
+    @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            Log.write("launch at login toggle failed: \(error)")
+        }
+        sender.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 }
