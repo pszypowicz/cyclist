@@ -183,18 +183,26 @@ final class SwitcherController {
             return
         }
         // Reaching a window in another Space needs a real Mission Control
-        // transition, which only the Dock can perform (see Dock.swift), so
-        // other-Space rows are activated like a Dock click. The make-key
-        // below covers same-Space rows: since macOS 14,
-        // NSRunningApplication.activate is an advisory request the system
-        // ignores from here, so it cannot move activation (or the menu bar)
-        // by itself.
+        // transition, which only the Dock can perform: navigate there with
+        // the synthesized Ctrl+Arrow shortcut, then make the target window
+        // key. A Dock icon press is the fallback (it activates natively but
+        // does not enter fullscreen Spaces). The make-key also covers
+        // same-Space rows: since macOS 14, NSRunningApplication.activate is
+        // an advisory request the system ignores from here, so it cannot
+        // move activation (or the menu bar) by itself.
         if entry.state == .otherSpace {
+            if let spaceID = entry.spaceID, Spaces.navigate(to: spaceID) {
+                Log.write("navigate: \(entry.appName) space=\(spaceID)")
+                if let windowID = entry.windowID {
+                    Spaces.makeKey(pid: app.processIdentifier, windowID: windowID)
+                }
+                return
+            }
             if Dock.pressIcon(named: entry.appName) {
                 Log.write("dock press: \(entry.appName)")
                 return
             }
-            Log.write("dock press failed for \(entry.appName), falling back to makeKey")
+            Log.write("otherSpace activation fallback for \(entry.appName)")
         }
         if app.isHidden {
             app.unhide()

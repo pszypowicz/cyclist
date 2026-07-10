@@ -118,6 +118,40 @@ enum Spaces {
     // SLSShowSpaces/SLSHideSpaces) from here. Those flip WindowServer
     // bookkeeping without the Mission Control choreography: the old Space
     // keeps compositing underneath the new one, and once desynchronized even
-    // native transitions stop working until the Dock restarts. Cross-Space
-    // activation goes through the Dock instead (Dock.swift).
+    // native transitions stop working until the WindowServer state resets.
+
+    // Navigate to a Space the native way: synthesize the Mission Control
+    // "Move left/right a space" shortcut (Ctrl+Arrow) for the number of steps
+    // between the current and target position in the display's Space order.
+    // Activating an app never transitions into an existing fullscreen Space
+    // (native Cmd+Tab does not either), so keystrokes handled by the Dock are
+    // the only safe route in, animation included. Requires those Mission
+    // Control shortcuts to remain enabled.
+    static func navigate(to spaceID: UInt64) -> Bool {
+        guard let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID())?
+            .takeRetainedValue() as? [[String: Any]] else { return false }
+        for display in displays {
+            guard let spaces = display["Spaces"] as? [[String: Any]],
+                  let current = (display["Current Space"] as? [String: Any])?["id64"] as? UInt64
+            else { continue }
+            let ids = spaces.compactMap { $0["id64"] as? UInt64 }
+            guard let targetIndex = ids.firstIndex(of: spaceID) else { continue }
+            guard let currentIndex = ids.firstIndex(of: current) else { return false }
+            let steps = targetIndex - currentIndex
+            for _ in 0..<abs(steps) {
+                postCtrlArrow(right: steps > 0)
+            }
+            return true
+        }
+        return false
+    }
+
+    private static func postCtrlArrow(right: Bool) {
+        let keyCode: CGKeyCode = right ? 124 : 123
+        for down in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: down) else { continue }
+            event.flags = .maskControl
+            event.post(tap: .cghidEventTap)
+        }
+    }
 }
