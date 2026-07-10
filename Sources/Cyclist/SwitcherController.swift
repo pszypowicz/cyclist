@@ -68,8 +68,8 @@ final class SwitcherController {
             cancel()
             return true
         case leftArrowKey where controlOnly, rightArrowKey where controlOnly:
-            // Workspace/Space chain navigation. Handled off the tap callback
-            // so AeroSpace CLI calls cannot stall the tap.
+            // Space navigation, handled off the tap callback so nothing can
+            // stall event delivery.
             let left = keyCode == leftArrowKey
             DispatchQueue.main.async { [weak self] in self?.chain.navigate(left: left) }
             return true

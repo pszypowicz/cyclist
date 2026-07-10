@@ -5,9 +5,9 @@ import AppKit
 // Spaces alike - with instant, animation-free jumps. Arriving on a user
 // Space focuses its top window, so stepping out of a fullscreen app always
 // lands on something concrete instead of leaving the fullscreen app's menu
-// bar behind. Workspace systems layered on top of a single Space (AeroSpace
-// and friends) keep their own switching bindings; Cyclist deliberately
-// stays out of that business.
+// bar behind. Workspace systems layered on top of a single Space keep
+// their own switching bindings; Cyclist deliberately stays out of that
+// business.
 final class ChainNavigator {
     private let navigator: SpaceNavigator
 
