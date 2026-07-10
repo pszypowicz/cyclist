@@ -15,6 +15,8 @@ struct AppItem {
     let state: AppState
     let axWindowCount: Int
     let cgWindowCount: Int
+    // Space holding the app's window when state is otherSpace.
+    let otherSpaceID: UInt64?
 }
 
 // Builds the app list for a switcher session: all regular apps, classified
@@ -39,7 +41,7 @@ enum AppListProvider {
             guard app.activationPolicy == .regular, !app.isTerminated else { continue }
             guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { continue }
             let windowIDs = cgWindows[app.processIdentifier] ?? []
-            let (state, axCount) = classify(app: app, windowIDs: windowIDs, visibleSpaces: visibleSpaces)
+            let (state, axCount, otherSpaceID) = classify(app: app, windowIDs: windowIDs, visibleSpaces: visibleSpaces)
             switch state {
             case .hidden where !Settings.includeHidden: continue
             case .minimized where !Settings.includeMinimized: continue
@@ -52,7 +54,8 @@ enum AppListProvider {
                 name: app.localizedName ?? "Unknown",
                 state: state,
                 axWindowCount: axCount,
-                cgWindowCount: windowIDs.count
+                cgWindowCount: windowIDs.count,
+                otherSpaceID: otherSpaceID
             ))
         }
         items.sort {
@@ -65,22 +68,24 @@ enum AppListProvider {
         app: NSRunningApplication,
         windowIDs: [Int],
         visibleSpaces: Set<UInt64>
-    ) -> (AppState, Int) {
+    ) -> (AppState, Int, UInt64?) {
         let windows = AX.windows(pid: app.processIdentifier)
-        if app.isHidden { return (.hidden, windows.count) }
+        if app.isHidden { return (.hidden, windows.count, nil) }
         if windows.isEmpty {
             // A window on a Space that is not currently visible is genuinely
             // elsewhere. Space-less windows and windows sitting on the visible
             // Space (where AX would have seen a real one) are phantoms left
             // behind by closed windows.
-            let hasWindowElsewhere = windowIDs.contains { id in
+            for id in windowIDs {
                 let spaces = Spaces.spaceIDs(ofWindow: id)
-                return !spaces.isEmpty && spaces.isDisjoint(with: visibleSpaces)
+                if let space = spaces.first, spaces.isDisjoint(with: visibleSpaces) {
+                    return (.otherSpace, 0, space)
+                }
             }
-            return (hasWindowElsewhere ? .otherSpace : .noWindows, 0)
+            return (.noWindows, 0, nil)
         }
         let allMinimized = windows.allSatisfy { AX.bool($0, kAXMinimizedAttribute) == true }
-        return (allMinimized ? .minimized : .normal, windows.count)
+        return (allMinimized ? .minimized : .normal, windows.count, nil)
     }
 
     private static func cgWindowIDs() -> [pid_t: [Int]] {

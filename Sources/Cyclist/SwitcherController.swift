@@ -178,6 +178,11 @@ final class SwitcherController {
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
             return
         }
+        // Activation alone never switches Spaces (the Dock does that part for
+        // the native switcher), so jump to the window's Space first.
+        if item.state == .otherSpace, let spaceID = item.otherSpaceID {
+            Spaces.switchTo(spaceID: spaceID)
+        }
         app.activate(options: [.activateIgnoringOtherApps])
     }
 

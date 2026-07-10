@@ -14,6 +14,9 @@ private func CGSCopySpacesForWindows(_ cid: UInt32, _ mask: UInt32, _ windowIDs:
 @_silgen_name("CGSCopyManagedDisplaySpaces")
 private func CGSCopyManagedDisplaySpaces(_ cid: UInt32) -> Unmanaged<CFArray>?
 
+@_silgen_name("CGSManagedDisplaySetCurrentSpace")
+private func CGSManagedDisplaySetCurrentSpace(_ cid: UInt32, _ display: CFString, _ space: UInt64)
+
 enum Spaces {
     private static let allSpacesMask: UInt32 = 7
 
@@ -29,6 +32,23 @@ enum Spaces {
             }
         }
         return ids
+    }
+
+    // Make the given Space current on whichever display owns it. Activating
+    // an app never switches Spaces by itself; the Dock performs this step for
+    // the native switcher, so Cyclist has to as well. The jump is instant,
+    // without the sliding animation.
+    static func switchTo(spaceID: UInt64) {
+        guard let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID())?
+            .takeRetainedValue() as? [[String: Any]] else { return }
+        for display in displays {
+            guard let identifier = display["Display Identifier"] as? String,
+                  let spaces = display["Spaces"] as? [[String: Any]] else { continue }
+            if spaces.contains(where: { ($0["id64"] as? UInt64) == spaceID }) {
+                CGSManagedDisplaySetCurrentSpace(CGSMainConnectionID(), identifier as CFString, spaceID)
+                return
+            }
+        }
     }
 
     // Empty for windows not assigned to any Space (closed-but-cached windows,
