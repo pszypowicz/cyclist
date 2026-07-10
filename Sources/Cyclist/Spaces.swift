@@ -77,11 +77,19 @@ enum Spaces {
     static func makeKey(pid: pid_t, windowID: Int) {
         guard let setFront = SLPSSetFrontProcessWithOptions,
               let postEvent = SLPSPostEventRecordTo,
-              let getPSN = GetProcessForPIDFallback else { return }
+              let getPSN = GetProcessForPIDFallback else {
+            Log.write("makeKey: symbol resolution failed")
+            return
+        }
         var psn = ProcessSerialNumber()
-        guard getPSN(pid, &psn) == 0 else { return }
+        let psnErr = getPSN(pid, &psn)
+        guard psnErr == 0 else {
+            Log.write("makeKey: GetProcessForPID(\(pid)) failed: \(psnErr)")
+            return
+        }
         let wid = UInt32(windowID)
-        _ = setFront(&psn, wid, 0x200)  // kCPSUserGenerated
+        let frontErr = setFront(&psn, wid, 0x200)  // kCPSUserGenerated
+        Log.write("makeKey: pid=\(pid) wid=\(wid) setFront=\(frontErr)")
         var bytes = [UInt8](repeating: 0, count: 0xf8)
         bytes[0x04] = 0xf8
         bytes[0x3a] = 0x10

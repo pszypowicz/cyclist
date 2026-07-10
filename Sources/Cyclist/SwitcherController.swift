@@ -15,6 +15,7 @@ final class SwitcherController {
     }
     private var session: Session?
     private var showPanelWork: DispatchWorkItem?
+    private var pendingFocusWork: DispatchWorkItem?
 
     private let tabKey: Int64 = 48
     private let graveKey: Int64 = 50
@@ -169,6 +170,10 @@ final class SwitcherController {
 
     private func activate(_ entry: ListEntry) {
         let app = entry.app
+        Log.write("activate: app=\(entry.appName) state=\(entry.state)"
+            + " windowID=\(entry.windowID.map(String.init) ?? "-")"
+            + " spaceID=\(entry.spaceID.map(String.init) ?? "-")"
+            + " from=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")")
         // Plain activation does nothing visible for an app with no windows.
         // Launching it again is Dock-click semantics: the app gets a reopen
         // event and recreates its window.
@@ -187,9 +192,24 @@ final class SwitcherController {
             Spaces.switchTo(spaceID: spaceID)
             if let windowID = entry.windowID {
                 let pid = app.processIdentifier
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                let previousFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                pendingFocusWork?.cancel()
+                let work = DispatchWorkItem {
                     Spaces.makeKey(pid: pid, windowID: windowID)
                     app.activate(options: [.activateIgnoringOtherApps])
+                }
+                pendingFocusWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+                // Self-heal: if focus never moved off the app we came from,
+                // the transition did not take; fire the focus once more.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    let front = NSWorkspace.shared.frontmostApplication
+                    if front?.processIdentifier != pid, front?.processIdentifier == previousFront {
+                        Log.write("focus retry: frontmost=\(front?.localizedName ?? "?")"
+                            + " expected=\(app.localizedName ?? "?")")
+                        Spaces.makeKey(pid: pid, windowID: windowID)
+                        app.activate(options: [.activateIgnoringOtherApps])
+                    }
                 }
                 return
             }
