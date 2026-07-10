@@ -59,6 +59,26 @@ final class ChainNavigator {
         display.order.first { display.types[$0] == 0 }
     }
 
+    // Front-to-back on-screen window list; the first regular-app window is
+    // what the user sees on top of the current Space.
+    private static func focusTopUserWindow() {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        for info in list {
+            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let alpha = info[kCGWindowAlpha as String] as? Double, alpha > 0,
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
+                  bounds.width >= 100, bounds.height >= 80,
+                  let windowID = info[kCGWindowNumber as String] as? Int,
+                  let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+                  NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular
+            else { continue }
+            Log.write("chain: focus top window \(windowID) pid \(pid)")
+            Spaces.makeKey(pid: pid, windowID: windowID)
+            return
+        }
+    }
+
     private func buildChain(display: (order: [UInt64], types: [UInt64: Int], current: UInt64)) -> [Entry] {
         var chain: [Entry] = []
         let userSpaceID = userSpace(in: display)
@@ -139,10 +159,19 @@ final class ChainNavigator {
                     Log.write("chain: focus workspace \(id) window \(windowID)")
                     Spaces.makeKey(pid: pid, windowID: windowID)
                 }
+            } else if inFullscreen {
+                // Stepping out of fullscreen onto a workspace with no
+                // user-Space window (its windows are the fullscreen ones, or
+                // it is empty): a rest stop. Never run `aerospace workspace`
+                // here - it MRU-focuses one of the workspace's fullscreen
+                // windows and drags macOS straight back into the Space just
+                // left. Focus whatever is on top of the user Space instead;
+                // AeroSpace follows that focus on its own.
+                focusEntry = {
+                    Log.write("chain: rest stop at workspace \(id), focusing top window")
+                    Self.focusTopUserWindow()
+                }
             } else {
-                // Workspace with no user-Space window (its windows live in
-                // fullscreen Spaces, or it is empty): let AeroSpace switch;
-                // there is no window whose fullscreen sibling could hijack it.
                 focusEntry = {
                     Log.write("chain: switch to workspace \(id)")
                     DispatchQueue.global().async { _ = Aerospace.run(["workspace", id]) }
