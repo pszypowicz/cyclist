@@ -12,22 +12,32 @@ import AppKit
 //   make hotkeys "stop working".
 //
 // The system disables taps whose callback stalls; both re-enable themselves
-// and log when that happens.
+// and log when that happens. Revoking Accessibility invalidates the tap
+// ports outright (the callback stops firing entirely), which is surfaced
+// through onInvalidated so the owner can poll for the grant and call
+// start() again - start() tears down dead ports and rebuilds.
 final class EventTap {
     // Raw CGS gesture events (trackpad touches) are not in the public
     // CGEventType enum.
     private static let gestureEventType: UInt32 = 29
 
+    // The invalidation callback is a C function pointer and cannot capture;
+    // a single live instance is all this app ever has.
+    private static weak var current: EventTap?
+
     // Return true to consume the event.
     var onKeyDown: ((CGEvent) -> Bool)?
     var onFlagsChanged: ((CGEvent) -> Void)?
     var onGesture: ((CGEvent) -> Void)?
+    var onInvalidated: (() -> Void)?
 
     private var keyTap: CFMachPort?
     private var gestureTap: CFMachPort?
 
     func start() -> Bool {
-        guard keyTap == nil else { return true }
+        if let keyTap, CFMachPortIsValid(keyTap) { return true }
+        stop()
+        Self.current = self
 
         let keyMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
         guard let keys = CGEvent.tapCreate(
@@ -45,6 +55,10 @@ final class EventTap {
         }
         keyTap = keys
         add(tap: keys)
+        CFMachPortSetInvalidationCallBack(keys) { _, _ in
+            Log.write("event tap: key tap invalidated")
+            DispatchQueue.main.async { EventTap.current?.onInvalidated?() }
+        }
 
         let gestureMask = CGEventMask(1) << Self.gestureEventType
         if let gestures = CGEvent.tapCreate(
@@ -64,6 +78,18 @@ final class EventTap {
             Log.write("event tap: gesture tap creation failed; 3-finger swipe disabled")
         }
         return true
+    }
+
+    private func stop() {
+        for tap in [keyTap, gestureTap].compactMap({ $0 }) {
+            // Clear the callback first: a deliberate teardown must not look
+            // like a revocation and re-trigger recovery.
+            CFMachPortSetInvalidationCallBack(tap, nil)
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)  // also removes its run-loop source
+        }
+        keyTap = nil
+        gestureTap = nil
     }
 
     private func add(tap: CFMachPort) {

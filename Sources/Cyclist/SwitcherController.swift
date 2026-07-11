@@ -19,6 +19,10 @@ final class SwitcherController {
     private var session: Session?
     private var showPanelWork: DispatchWorkItem?
 
+    // Fired when the key tap dies (e.g. Accessibility revoked at runtime);
+    // the owner polls for the grant and calls start() to rebuild.
+    var onTapInvalidated: (() -> Void)?
+
     private let tabKey: Int64 = 48
     private let graveKey: Int64 = 50
     private let escapeKey: Int64 = 53
@@ -35,6 +39,9 @@ final class SwitcherController {
         }
         tap.onGesture = { [weak self] event in
             self?.swipeDetector.handle(event)
+        }
+        tap.onInvalidated = { [weak self] in
+            self?.onTapInvalidated?()
         }
         // Natural-scroll convention, matching the trackpad: fingers left
         // moves forward through the chain, fingers right moves back.
