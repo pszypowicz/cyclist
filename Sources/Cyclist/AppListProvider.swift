@@ -65,7 +65,7 @@ enum AppListProvider {
     // switcher was summoned inside their Space at least once.
     static func harvestTitles() {
         var pids: Set<pid_t> = []
-        if let display = Spaces.mainDisplayInfo() {
+        if let display = Spaces.activeDisplayInfo() {
             let currentWindows = Spaces.windowIDs(inSpace: display.current)
             for window in CGWindows.real([.optionAll, .excludeDesktopElements])
             where currentWindows.contains(window.id) {

@@ -35,6 +35,10 @@ private typealias GetProcessForPIDFn = @convention(c) (
     pid_t, UnsafeMutablePointer<ProcessSerialNumber>
 ) -> Int32
 
+private typealias SLSCopyActiveMenuBarDisplayIdentifierFn = @convention(c) (UInt32) -> Unmanaged<CFString>?
+private let SLSCopyActiveMenuBarDisplayIdentifier =
+    resolve("SLSCopyActiveMenuBarDisplayIdentifier", as: SLSCopyActiveMenuBarDisplayIdentifierFn.self)
+
 private let SLPSSetFrontProcessWithOptions =
     resolve("_SLPSSetFrontProcessWithOptions", as: SLPSSetFrontProcessFn.self)
 private let SLPSPostEventRecordTo =
@@ -73,9 +77,44 @@ enum Spaces {
         return (order, types, current)
     }
 
-    // Space order, types, and current Space of the primary display.
-    static func mainDisplayInfo() -> DisplayInfo? {
-        managedDisplays().first.flatMap(parse)
+    // The managed-display dict of the display whose menu bar is active: the
+    // display keyboard focus follows, and the only one the synthetic dock
+    // swipes can act on. Falls back to the first listed display when the SLS
+    // symbol or a match is unavailable.
+    private static func activeDisplay() -> [String: Any]? {
+        let displays = managedDisplays()
+        guard let copyIdentifier = SLSCopyActiveMenuBarDisplayIdentifier,
+              let active = copyIdentifier(CGSMainConnectionID())?.takeRetainedValue() as String?
+        else { return displays.first }
+        let target = canonicalUUID(active)
+        return displays.first {
+            ($0["Display Identifier"] as? String).map(canonicalUUID) == target
+        } ?? displays.first
+    }
+
+    // Both the SLS call and the managed-display dicts can report the literal
+    // "Main" instead of a UUID (and not necessarily in tandem), so both
+    // sides are canonicalized to the UUID form before comparing.
+    private static func canonicalUUID(_ identifier: String) -> String {
+        guard identifier == "Main",
+              let uuid = CGDisplayCreateUUIDFromDisplayID(CGMainDisplayID())?.takeRetainedValue()
+        else { return identifier }
+        return CFUUIDCreateString(nil, uuid) as String
+    }
+
+    // Space order, types, and current Space of the active display.
+    static func activeDisplayInfo() -> DisplayInfo? {
+        activeDisplay().flatMap(parse)
+    }
+
+    static func activeDisplayID() -> CGDirectDisplayID? {
+        guard let identifier = activeDisplay()?["Display Identifier"] as? String else { return nil }
+        if identifier == "Main" {
+            return CGMainDisplayID()
+        }
+        guard let uuid = CFUUIDCreateFromString(nil, identifier as CFString) else { return nil }
+        let id = CGDisplayGetDisplayIDFromUUID(uuid)
+        return id == 0 ? nil : id
     }
 
     // Same, for the display whose Space order contains the given Space.

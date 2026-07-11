@@ -21,10 +21,13 @@ final class SpaceNavigator {
     private var stepWork: DispatchWorkItem?
     private var attempts = 0
 
-    // Returns false when no display's Space order contains the target.
-    // `onArrival` runs once, after the Space change is verified.
+    // Returns false when the active display's Space order does not contain
+    // the target: the dock swipes act on the active display only, so a
+    // target on another display would displace the wrong display's Spaces
+    // (worse with every retry). `onArrival` runs once, after the Space
+    // change is verified.
     func begin(to spaceID: UInt64, onArrival: (() -> Void)? = nil) -> Bool {
-        guard Spaces.orderInfo(containing: spaceID) != nil else { return false }
+        guard Spaces.activeDisplayInfo()?.order.contains(spaceID) == true else { return false }
         cancel()
         target = spaceID
         self.onArrival = onArrival
@@ -42,7 +45,7 @@ final class SpaceNavigator {
 
     private func step() {
         guard let target else { return }
-        guard let info = Spaces.orderInfo(containing: target),
+        guard let info = Spaces.activeDisplayInfo(),
               let targetIndex = info.order.firstIndex(of: target),
               let currentIndex = info.order.firstIndex(of: info.current) else {
             cancel()
