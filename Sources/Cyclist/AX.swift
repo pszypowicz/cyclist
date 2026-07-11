@@ -5,10 +5,38 @@ import ApplicationServices
 @_silgen_name("_AXUIElementGetWindow")
 private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<UInt32>) -> AXError
 
+// A window that qualifies for the switcher, with the attributes both list
+// providers need.
+struct AXWindowInfo {
+    let element: AXUIElement
+    let title: String?  // nil when empty or unreadable
+    let isMinimized: Bool
+    let windowID: Int?
+}
+
 // Thin helpers over the Accessibility C API. All calls are bounded by a short
 // global messaging timeout so an unresponsive app cannot stall the switcher
 // (a stalled event tap callback gets disabled by the system).
 enum AX {
+    // Standard and dialog windows of the app, with title, minimized state,
+    // and CG window id. A window whose subrole is unreadable passes the
+    // filter (matching apps that report no subrole at all).
+    static func qualifiedWindows(pid: pid_t) -> [AXWindowInfo] {
+        windows(pid: pid).compactMap { window in
+            if let subrole = string(window, kAXSubroleAttribute) {
+                guard subrole == kAXStandardWindowSubrole as String
+                        || subrole == kAXDialogSubrole as String else { return nil }
+            }
+            let title = string(window, kAXTitleAttribute)
+            return AXWindowInfo(
+                element: window,
+                title: (title?.isEmpty == false) ? title : nil,
+                isMinimized: bool(window, kAXMinimizedAttribute) == true,
+                windowID: windowID(of: window)
+            )
+        }
+    }
+
     static func windowID(of element: AXUIElement) -> Int? {
         var wid: UInt32 = 0
         guard _AXUIElementGetWindow(element, &wid) == .success, wid != 0 else { return nil }

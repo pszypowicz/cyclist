@@ -136,28 +136,21 @@ enum AppListProvider {
             var appEntries: [ListEntry] = []
             var hasAnyWindow = false
 
-            for window in AX.windows(pid: app.processIdentifier) {
-                if let subrole = AX.string(window, kAXSubroleAttribute) {
-                    guard subrole == kAXStandardWindowSubrole as String
-                            || subrole == kAXDialogSubrole as String else { continue }
-                }
+            for window in AX.qualifiedWindows(pid: app.processIdentifier) {
                 hasAnyWindow = true
-                let minimized = AX.bool(window, kAXMinimizedAttribute) == true
-                let state: EntryState = hidden ? .hidden : (minimized ? .minimized : .normal)
+                let state: EntryState = hidden ? .hidden : (window.isMinimized ? .minimized : .normal)
                 if state == .minimized && !Settings.includeMinimized { continue }
-                let title = AX.string(window, kAXTitleAttribute) ?? ""
-                let windowID = AX.windowID(of: window)
-                if let windowID, !title.isEmpty {
+                if let windowID = window.windowID, let title = window.title {
                     cacheTitle(title, windowID: windowID)
                 }
                 appEntries.append(ListEntry(
                     app: app,
                     appName: name,
-                    windowTitle: title.isEmpty ? nil : title,
+                    windowTitle: window.title,
                     state: state,
-                    axWindow: window,
+                    axWindow: window.element,
                     spaceID: nil,
-                    windowID: windowID
+                    windowID: window.windowID
                 ))
             }
 

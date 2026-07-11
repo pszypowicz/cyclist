@@ -14,23 +14,16 @@ struct WindowItem {
 enum WindowListProvider {
     static func snapshot(for app: NSRunningApplication) -> [WindowItem] {
         var items: [WindowItem] = []
-        for window in AX.windows(pid: app.processIdentifier) {
-            if let subrole = AX.string(window, kAXSubroleAttribute) {
-                guard subrole == kAXStandardWindowSubrole as String
-                        || subrole == kAXDialogSubrole as String else { continue }
-            }
-            let minimized = AX.bool(window, kAXMinimizedAttribute) == true
-            if minimized && !Settings.includeMinimized { continue }
-            let title = AX.string(window, kAXTitleAttribute) ?? ""
-            let windowID = AX.windowID(of: window)
-            if let windowID, !title.isEmpty {
+        for window in AX.qualifiedWindows(pid: app.processIdentifier) {
+            if window.isMinimized && !Settings.includeMinimized { continue }
+            if let windowID = window.windowID, let title = window.title {
                 AppListProvider.cacheTitle(title, windowID: windowID)
             }
             items.append(WindowItem(
-                element: window,
-                title: title.isEmpty ? (app.localizedName ?? "Untitled") : title,
-                isMinimized: minimized,
-                windowID: windowID
+                element: window.element,
+                title: window.title ?? (app.localizedName ?? "Untitled"),
+                isMinimized: window.isMinimized,
+                windowID: window.windowID
             ))
         }
         return items
