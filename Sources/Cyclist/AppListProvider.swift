@@ -75,6 +75,13 @@ enum AppListProvider {
         if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier {
             pids.insert(front)
         }
+        harvestTitles(pids: pids)
+    }
+
+    // AX title sweep for the given apps only. Cheap enough for hot callers
+    // (a single app on activation); the full-Space pid discovery above is
+    // reserved for Space arrivals.
+    static func harvestTitles(pids: Set<pid_t>) {
         for pid in pids {
             guard NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular else { continue }
             for window in AX.windows(pid: pid) {
