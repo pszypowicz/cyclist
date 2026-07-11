@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AX.configureGlobalTimeout()
         mru = MRUTracker()
         controller = SwitcherController(mru: mru)
+        controller.onTapInvalidated = { [weak self] in self?.scheduleRecovery() }
         statusItem.setUp()
         ensurePermissionAndStart()
         // Optional: unlocks live titles for windows in other Spaces via
@@ -25,22 +26,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func ensurePermissionAndStart() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        if AXIsProcessTrustedWithOptions(options) {
-            startTap()
+        if AXIsProcessTrustedWithOptions(options), controller.start() {
             return
         }
-        // Poll until the user grants Accessibility in System Settings, then attach.
-        permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in
-            guard AXIsProcessTrusted() else { return }
-            timer.invalidate()
-            self?.permissionTimer = nil
-            self?.startTap()
-        }
+        scheduleRecovery()
     }
 
-    private func startTap() {
-        if !controller.start() {
-            NSLog("Cyclist: failed to create the keyboard event tap")
+    // Poll until Accessibility is granted (first launch, or re-granted after
+    // a runtime revocation invalidated the tap) and the tap is rebuilt. Also
+    // covers tap creation failing while trusted, e.g. a stale TCC entry.
+    private func scheduleRecovery() {
+        guard permissionTimer == nil else { return }
+        Log.write("event tap down or Accessibility not granted; polling to rebuild")
+        permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in
+            guard let self, AXIsProcessTrusted(), self.controller.start() else { return }
+            timer.invalidate()
+            self.permissionTimer = nil
+            Log.write("event tap running")
         }
     }
 }

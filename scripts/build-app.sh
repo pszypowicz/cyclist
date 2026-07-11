@@ -57,7 +57,9 @@ cp "$bin" "$app/Contents/MacOS/Cyclist"
 if [[ "$identity" == "adhoc" ]]; then
   sign="-"
 else
-  sign="$(security find-identity -v -p codesigning | awk -v id="$identity" '$0 ~ id {print $2; exit}')"
+  # || true: with set -e, a failing security query (locked/absent keychain)
+  # would abort here and skip the ad-hoc fallback below.
+  sign="$(security find-identity -v -p codesigning | awk -v id="$identity" '$0 ~ id {print $2; exit}' || true)"
   if [[ -z "$sign" ]]; then
     echo "No codesigning identity matching '$identity'; falling back to ad-hoc." >&2
     sign="-"

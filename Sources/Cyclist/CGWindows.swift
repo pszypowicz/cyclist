@@ -9,6 +9,7 @@ struct CGWindowInfoLite {
     let id: Int
     let pid: pid_t
     let title: String?
+    let bounds: CGRect  // global top-left-origin CG coordinates
 }
 
 enum CGWindows {
@@ -30,7 +31,8 @@ enum CGWindows {
             result.append(CGWindowInfoLite(
                 id: windowID,
                 pid: pid,
-                title: (name?.isEmpty == false) ? name : nil
+                title: (name?.isEmpty == false) ? name : nil,
+                bounds: bounds
             ))
         }
         return result

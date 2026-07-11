@@ -13,11 +13,30 @@ final class SwitcherController {
     private let swipeDetector = SwipeDetector()
 
     private enum Session {
+        // Snapshot still building off the tap callback. `presses` records
+        // each Tab/backtick press as its Shift state (never empty) so the
+        // completion replays them through the same start-index and step
+        // logic a live session uses.
+        case pendingApps(presses: [Bool])
+        case pendingWindows(NSRunningApplication, presses: [Bool])
         case apps([ListEntry], index: Int)
         case windows(NSRunningApplication, [WindowItem], index: Int)
     }
     private var session: Session?
+    // Guards pending completions: a snapshot that resolves after its session
+    // was cancelled or superseded must not apply.
+    private var snapshotGeneration = 0
+    // Pending sessions whose Cmd was already released: they commit when
+    // their snapshot arrives. Kept outside `session` so the release keeps
+    // its usual meaning - the session is over, Esc passes through again,
+    // and the next press starts a fresh session instead of folding into a
+    // finished one.
+    private var pendingCommits: [(generation: Int, session: Session)] = []
     private var showPanelWork: DispatchWorkItem?
+
+    // Fired when the key tap dies (e.g. Accessibility revoked at runtime);
+    // the owner polls for the grant and calls start() to rebuild.
+    var onTapInvalidated: (() -> Void)?
 
     private let tabKey: Int64 = 48
     private let graveKey: Int64 = 50
@@ -35,6 +54,9 @@ final class SwitcherController {
         }
         tap.onGesture = { [weak self] event in
             self?.swipeDetector.handle(event)
+        }
+        tap.onInvalidated = { [weak self] in
+            self?.onTapInvalidated?()
         }
         // Natural-scroll convention, matching the trackpad: fingers left
         // moves forward through the chain, fingers right moves back.
@@ -79,8 +101,12 @@ final class SwitcherController {
     }
 
     private func handleFlagsChanged(_ event: CGEvent) {
-        guard session != nil else { return }
-        if !event.flags.contains(.maskCommand) {
+        guard let session, !event.flags.contains(.maskCommand) else { return }
+        switch session {
+        case .pendingApps, .pendingWindows:
+            pendingCommits.append((snapshotGeneration, session))
+            self.session = nil
+        case .apps, .windows:
             commit()
         }
     }
@@ -91,25 +117,26 @@ final class SwitcherController {
             let next = step(index, count: items.count, backward: backward)
             session = .apps(items, index: next)
             panel.select(index: next)
-        case .windows:
+        case .pendingApps(let presses):
+            // A press while the snapshot builds advances the pending
+            // selection.
+            session = .pendingApps(presses: presses + [backward])
+        case .windows, .pendingWindows:
             break
         case nil:
-            let items = AppListProvider.snapshot(mru: mru)
-            guard !items.isEmpty else { return }
-            // A quick tap should land on the previous app, not on another
-            // window of the frontmost app, whose windows head the MRU list.
-            let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
-            let firstOtherApp = items.firstIndex { $0.app.processIdentifier != front }
-            let forwardStart = firstOtherApp ?? (items.count > 1 ? 1 : 0)
-            let start = backward ? items.count - 1 : forwardStart
-            session = .apps(items, index: start)
-            presentPanel(
-                rows: items.map {
-                    SwitcherRow(icon: $0.app.icon, title: $0.appName, subtitle: $0.windowTitle,
-                                annotation: annotation(for: $0))
-                },
-                selected: start
-            )
+            // The snapshot's AX sweep can take long enough to get the tap
+            // disabled (and stall all keyboard input behind the callback),
+            // so it runs after the callback returns; presses and the Cmd
+            // release accumulate on the pending session meanwhile. Snapshots
+            // are dispatched in session order, so a fresh session started
+            // right after a quick tap resolves after the tap's commit.
+            session = .pendingApps(presses: [backward])
+            snapshotGeneration += 1
+            let generation = snapshotGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.finishAppsSnapshot(AppListProvider.snapshot(mru: self.mru), generation: generation)
+            }
         }
     }
 
@@ -119,22 +146,100 @@ final class SwitcherController {
             let next = step(index, count: items.count, backward: backward)
             session = .windows(app, items, index: next)
             panel.select(index: next)
-        case .apps:
+        case .pendingWindows(let app, let presses):
+            session = .pendingWindows(app, presses: presses + [backward])
+        case .apps, .pendingApps:
             break
         case nil:
             guard let app = NSWorkspace.shared.frontmostApplication else { return }
-            let items = WindowListProvider.snapshot(for: app)
-            guard !items.isEmpty else { return }
-            let start = startIndex(count: items.count, backward: backward)
-            session = .windows(app, items, index: start)
-            presentPanel(
-                rows: items.map {
-                    SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
-                                annotation: $0.isMinimized ? "minimized" : nil)
-                },
-                selected: start
-            )
+            session = .pendingWindows(app, presses: [backward])
+            snapshotGeneration += 1
+            let generation = snapshotGeneration
+            DispatchQueue.main.async { [weak self] in
+                self?.finishWindowsSnapshot(WindowListProvider.snapshot(for: app), generation: generation)
+            }
         }
+    }
+
+    private func finishAppsSnapshot(_ items: [ListEntry], generation: Int) {
+        // Cmd already released: a quick tap commits straight from here,
+        // never showing the panel.
+        if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
+            let pending = pendingCommits.remove(at: pendingIndex)
+            guard case .pendingApps(let presses) = pending.session else { return }
+            guard !items.isEmpty else {
+                Log.write("apps snapshot empty; consumed Cmd+Tab dropped")
+                return
+            }
+            activate(items[replay(presses, count: items.count,
+                                  initial: initialAppsIndex(items: items, backward: presses[0]))])
+            return
+        }
+        guard generation == snapshotGeneration,
+              case .pendingApps(let presses) = session else { return }
+        guard !items.isEmpty else {
+            Log.write("apps snapshot empty; consumed Cmd+Tab dropped")
+            session = nil
+            return
+        }
+        let index = replay(presses, count: items.count,
+                           initial: initialAppsIndex(items: items, backward: presses[0]))
+        session = .apps(items, index: index)
+        presentPanel(
+            rows: items.map {
+                SwitcherRow(icon: $0.app.icon, title: $0.appName, subtitle: $0.windowTitle,
+                            annotation: annotation(for: $0))
+            },
+            selected: index
+        )
+    }
+
+    private func finishWindowsSnapshot(_ items: [WindowItem], generation: Int) {
+        if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
+            let pending = pendingCommits.remove(at: pendingIndex)
+            guard case .pendingWindows(let app, let presses) = pending.session else { return }
+            guard !items.isEmpty else {
+                Log.write("window snapshot empty; consumed Cmd+` dropped")
+                return
+            }
+            let item = items[replay(presses, count: items.count,
+                                    initial: startIndex(count: items.count, backward: presses[0]))]
+            focus(app: app, element: item.element, windowID: item.windowID, spaceID: item.spaceID)
+            return
+        }
+        guard generation == snapshotGeneration,
+              case .pendingWindows(let app, let presses) = session else { return }
+        guard !items.isEmpty else {
+            Log.write("window snapshot empty; consumed Cmd+` dropped")
+            session = nil
+            return
+        }
+        let index = replay(presses, count: items.count,
+                           initial: startIndex(count: items.count, backward: presses[0]))
+        session = .windows(app, items, index: index)
+        presentPanel(
+            rows: items.map {
+                SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
+                            annotation: $0.isMinimized ? "minimized" : nil)
+            },
+            selected: index
+        )
+    }
+
+    // The first press picked the start index; each further press steps.
+    private func replay(_ presses: [Bool], count: Int, initial: Int) -> Int {
+        presses.dropFirst().reduce(initial) { index, backward in
+            step(index, count: count, backward: backward)
+        }
+    }
+
+    // A quick tap should land on the previous app, not on another window of
+    // the frontmost app, whose windows head the MRU list.
+    private func initialAppsIndex(items: [ListEntry], backward: Bool) -> Int {
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let firstOtherApp = items.firstIndex { $0.app.processIdentifier != front }
+        let forwardStart = firstOtherApp ?? (items.count > 1 ? 1 : 0)
+        return backward ? items.count - 1 : forwardStart
     }
 
     private func startIndex(count: Int, backward: Bool) -> Int {
@@ -179,72 +284,66 @@ final class SwitcherController {
 
     private func commit() {
         guard let session else { return }
-        self.session = nil
-        dismissPanel()
         switch session {
+        case .pendingApps, .pendingWindows:
+            // A pending session commits from its snapshot completion.
+            return
         case .apps(let items, let index):
+            self.session = nil
+            dismissPanel()
             activate(items[index])
         case .windows(let app, let items, let index):
-            navigator.cancel()
+            self.session = nil
+            dismissPanel()
             let item = items[index]
-            focusWindow(app: app, element: item.element, windowID: item.windowID)
+            focus(app: app, element: item.element, windowID: item.windowID, spaceID: item.spaceID)
         }
     }
 
     private func activate(_ entry: ListEntry) {
         let app = entry.app
-        // A newer activation supersedes any Space navigation still in flight.
-        navigator.cancel()
         Log.write("activate: app=\(entry.appName) state=\(entry.state)"
             + " windowID=\(entry.windowID.map(String.init) ?? "-")"
             + " spaceID=\(entry.spaceID.map(String.init) ?? "-")"
             + " from=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")")
-        // Plain activation does nothing visible for an app with no windows.
-        // Launching it again is Dock-click semantics: the app gets a reopen
-        // event and recreates its window.
-        if entry.state == .noWindows, let url = app.bundleURL {
+        // Plain activation does nothing visible for an app with no windows,
+        // and a row without any window handle (an other-Space app shown only
+        // as a reachability fallback) has nothing to focus or navigate to.
+        // Launching again is Dock-click semantics: the app gets a reopen
+        // event and brings its own windows along.
+        if entry.state == .noWindows || (entry.axWindow == nil && entry.windowID == nil),
+           let url = app.bundleURL {
+            navigator.cancel()
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
             return
         }
-        // Reaching a window in another Space needs a real Space transition
-        // (activation alone never performs one), so jump there and make the
-        // target window key on arrival. The make-key also covers same-Space
-        // rows: since macOS 14, NSRunningApplication.activate is an advisory
-        // request the system ignores from here, so it cannot move activation
-        // (or the menu bar) by itself.
-        if entry.state == .otherSpace {
-            let pid = app.processIdentifier
-            let windowID = entry.windowID
-            if let spaceID = entry.spaceID,
-               navigator.begin(to: spaceID, onArrival: windowID.map { wid in
-                   { Spaces.makeKey(pid: pid, windowID: wid) }
-               }) {
-                Log.write("navigate: \(entry.appName) space=\(spaceID)")
-                return
-            }
-            Log.write("otherSpace navigation unavailable for \(entry.appName)")
-        }
+        focus(app: app, element: entry.axWindow, windowID: entry.windowID, spaceID: entry.spaceID)
+    }
+
+    // Single focus path for every real-window row: unhide the app, jump to
+    // the window's non-visible Space when the provider resolved one (making
+    // the window key on arrival), else focus directly. Reaching a window in
+    // another Space needs a real Space transition - activation alone never
+    // performs one. Falls back to a direct focus when navigation is refused.
+    private func focus(app: NSRunningApplication, element: AXUIElement?, windowID: Int?, spaceID: UInt64?) {
+        // A newer activation supersedes any Space navigation still in flight.
+        navigator.cancel()
         if app.isHidden {
             app.unhide()
         }
-        // Rapid switching can leave AX still listing windows of the Space
-        // just left, so a "normal" row may actually live in a non-visible
-        // Space; focusing it alone would move the menu bar without the
-        // Space. Verify real Space membership and reroute.
-        if entry.state == .normal, let windowID = entry.windowID {
-            for (space, windowIDs) in Spaces.windowsByNonVisibleSpace()
-            where windowIDs.contains(windowID) {
-                Log.write("activate: window \(windowID) is actually in space \(space), navigating")
-                let pid = app.processIdentifier
-                _ = navigator.begin(to: space) {
-                    Spaces.makeKey(pid: pid, windowID: windowID)
-                }
-                return
-            }
+        if let spaceID, let windowID,
+           navigator.begin(to: spaceID, onArrival: { [weak self] in
+               self?.focusWindow(app: app, element: element, windowID: windowID)
+           }) {
+            Log.write("navigate: pid=\(app.processIdentifier) space=\(spaceID)")
+            return
         }
-        focusWindow(app: app, element: entry.axWindow, windowID: entry.windowID)
+        if spaceID != nil {
+            Log.write("otherSpace navigation unavailable for pid=\(app.processIdentifier); focusing directly")
+        }
+        focusWindow(app: app, element: element, windowID: windowID)
     }
 
     private func focusWindow(app: NSRunningApplication, element: AXUIElement?, windowID: Int?) {

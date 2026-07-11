@@ -11,10 +11,16 @@ if let flagIndex = arguments.firstIndex(of: "--goto-space") {
         FileHandle.standardError.write(Data("usage: Cyclist --goto-space <space-id>\n".utf8))
         exit(2)
     }
-    guard let info = Spaces.orderInfo(containing: spaceID),
+    // The dock-swipe gestures act on the active display only; computing
+    // steps from another display's Space order would displace the wrong
+    // display, so cross-display targets are refused instead.
+    guard let info = Spaces.activeDisplayInfo(),
           let targetIndex = info.order.firstIndex(of: spaceID),
           let currentIndex = info.order.firstIndex(of: info.current) else {
-        FileHandle.standardError.write(Data("Cyclist: unknown Space id \(spaceID)\n".utf8))
+        let message = Spaces.orderInfo(containing: spaceID) != nil
+            ? "Cyclist: Space \(spaceID) is on an inactive display; switching only works on the active display\n"
+            : "Cyclist: unknown Space id \(spaceID)\n"
+        FileHandle.standardError.write(Data(message.utf8))
         exit(1)
     }
     let steps = targetIndex - currentIndex

@@ -35,6 +35,10 @@ private typealias GetProcessForPIDFn = @convention(c) (
     pid_t, UnsafeMutablePointer<ProcessSerialNumber>
 ) -> Int32
 
+private typealias SLSCopyActiveMenuBarDisplayIdentifierFn = @convention(c) (UInt32) -> Unmanaged<CFString>?
+private let SLSCopyActiveMenuBarDisplayIdentifier =
+    resolve("SLSCopyActiveMenuBarDisplayIdentifier", as: SLSCopyActiveMenuBarDisplayIdentifierFn.self)
+
 private let SLPSSetFrontProcessWithOptions =
     resolve("_SLPSSetFrontProcessWithOptions", as: SLPSSetFrontProcessFn.self)
 private let SLPSPostEventRecordTo =
@@ -73,9 +77,44 @@ enum Spaces {
         return (order, types, current)
     }
 
-    // Space order, types, and current Space of the primary display.
-    static func mainDisplayInfo() -> DisplayInfo? {
-        managedDisplays().first.flatMap(parse)
+    // The managed-display dict of the display whose menu bar is active: the
+    // display keyboard focus follows, and the only one the synthetic dock
+    // swipes can act on. Falls back to the first listed display when the SLS
+    // symbol or a match is unavailable.
+    private static func activeDisplay() -> [String: Any]? {
+        let displays = managedDisplays()
+        guard let copyIdentifier = SLSCopyActiveMenuBarDisplayIdentifier,
+              let active = copyIdentifier(CGSMainConnectionID())?.takeRetainedValue() as String?
+        else { return displays.first }
+        let target = canonicalUUID(active)
+        return displays.first {
+            ($0["Display Identifier"] as? String).map(canonicalUUID) == target
+        } ?? displays.first
+    }
+
+    // Both the SLS call and the managed-display dicts can report the literal
+    // "Main" instead of a UUID (and not necessarily in tandem), so both
+    // sides are canonicalized to the UUID form before comparing.
+    private static func canonicalUUID(_ identifier: String) -> String {
+        guard identifier == "Main",
+              let uuid = CGDisplayCreateUUIDFromDisplayID(CGMainDisplayID())?.takeRetainedValue()
+        else { return identifier }
+        return CFUUIDCreateString(nil, uuid) as String
+    }
+
+    // Space order, types, and current Space of the active display.
+    static func activeDisplayInfo() -> DisplayInfo? {
+        activeDisplay().flatMap(parse)
+    }
+
+    static func activeDisplayID() -> CGDirectDisplayID? {
+        guard let identifier = activeDisplay()?["Display Identifier"] as? String else { return nil }
+        if identifier == "Main" {
+            return CGMainDisplayID()
+        }
+        guard let uuid = CFUUIDCreateFromString(nil, identifier as CFString) else { return nil }
+        let id = CGDisplayGetDisplayIDFromUUID(uuid)
+        return id == 0 ? nil : id
     }
 
     // Same, for the display whose Space order contains the given Space.
@@ -128,15 +167,17 @@ enum Spaces {
             Log.write("makeKey: GetProcessForPID(\(pid)) failed: \(psnErr)")
             return
         }
-        var wid = UInt32(windowID)
+        let wid = UInt32(windowID)
         let frontErr = setFront(&psn, wid, 0x200)  // kCPSUserGenerated
         Log.write("makeKey: pid=\(pid) wid=\(wid) setFront=\(frontErr)")
-        var point = CGPoint(x: -1, y: -1)
+        let point = CGPoint(x: -1, y: -1)
         var bytes = [UInt8](repeating: 0, count: 0x100)
         bytes[0x04] = 0xf8
         bytes[0x3a] = 0x10
-        memcpy(&bytes[0x3c], &wid, MemoryLayout<UInt32>.size)
-        memcpy(&bytes[0x20], &point, MemoryLayout<CGPoint>.size)
+        bytes.withUnsafeMutableBytes {
+            $0.storeBytes(of: wid, toByteOffset: 0x3c, as: UInt32.self)
+            $0.storeBytes(of: point, toByteOffset: 0x20, as: CGPoint.self)
+        }
         bytes[0x08] = 0x01  // kCGEventLeftMouseDown
         _ = postEvent(&psn, &bytes)
         bytes[0x08] = 0x02  // kCGEventLeftMouseUp

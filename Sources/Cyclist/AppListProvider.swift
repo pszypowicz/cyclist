@@ -16,9 +16,9 @@ struct ListEntry {
     let appName: String
     let windowTitle: String?
     let state: EntryState
-    let axWindow: AXUIElement?  // set for normal/minimized/hidden rows
-    let spaceID: UInt64?        // set for otherSpace rows
-    let windowID: Int?          // set for otherSpace rows
+    let axWindow: AXUIElement?  // set whenever AX exposes the window, any state
+    let spaceID: UInt64?        // set for otherSpace rows with a known Space
+    let windowID: Int?          // set for every real-window row AX can resolve
 }
 
 // Builds the switcher list: every window of every regular app, in app MRU
@@ -41,10 +41,20 @@ enum AppListProvider {
     private static let cacheBootKey = "titleCacheBootTime"
 
     private static var titleCache: [Int: String] = loadCache()
+    private static var cacheDirty = false
 
+    // The single mutation point of the cache. Persistence is deferred to
+    // flushTitleCache so a snapshot or harvest writes UserDefaults at most
+    // once instead of re-serializing the whole cache per new title.
     static func cacheTitle(_ title: String, windowID: Int) {
         guard titleCache[windowID] != title else { return }
         titleCache[windowID] = title
+        cacheDirty = true
+    }
+
+    static func flushTitleCache() {
+        guard cacheDirty else { return }
+        cacheDirty = false
         persistCache()
     }
 
@@ -55,7 +65,7 @@ enum AppListProvider {
     // switcher was summoned inside their Space at least once.
     static func harvestTitles() {
         var pids: Set<pid_t> = []
-        if let display = Spaces.mainDisplayInfo() {
+        if let display = Spaces.activeDisplayInfo() {
             let currentWindows = Spaces.windowIDs(inSpace: display.current)
             for window in CGWindows.real([.optionAll, .excludeDesktopElements])
             where currentWindows.contains(window.id) {
@@ -65,20 +75,22 @@ enum AppListProvider {
         if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier {
             pids.insert(front)
         }
-        var changed = false
+        harvestTitles(pids: pids)
+    }
+
+    // AX title sweep for the given apps only. Cheap enough for hot callers
+    // (a single app on activation); the full-Space pid discovery above is
+    // reserved for Space arrivals.
+    static func harvestTitles(pids: Set<pid_t>) {
         for pid in pids {
             guard NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular else { continue }
             for window in AX.windows(pid: pid) {
                 guard let windowID = AX.windowID(of: window),
-                      let title = AX.string(window, kAXTitleAttribute), !title.isEmpty,
-                      titleCache[windowID] != title else { continue }
-                titleCache[windowID] = title
-                changed = true
+                      let title = AX.string(window, kAXTitleAttribute), !title.isEmpty else { continue }
+                cacheTitle(title, windowID: windowID)
             }
         }
-        if changed {
-            persistCache()
-        }
+        flushTitleCache()
     }
 
     private static func bootTime() -> Double {
@@ -120,6 +132,10 @@ enum AppListProvider {
         }
         let otherSpaceWindows = Spaces.windowsByNonVisibleSpace()
             .sorted { $0.key < $1.key }
+        var spaceByWindow: [Int: UInt64] = [:]
+        for (space, windowIDs) in otherSpaceWindows {
+            for id in windowIDs { spaceByWindow[id] = space }
+        }
 
         let apps = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular && !$0.isTerminated
@@ -135,29 +151,39 @@ enum AppListProvider {
             let name = app.localizedName ?? "Unknown"
             var appEntries: [ListEntry] = []
             var hasAnyWindow = false
+            var hasOtherSpaceWindows = false
 
-            for window in AX.windows(pid: app.processIdentifier) {
-                if let subrole = AX.string(window, kAXSubroleAttribute) {
-                    guard subrole == kAXStandardWindowSubrole as String
-                            || subrole == kAXDialogSubrole as String else { continue }
-                }
+            // Space membership is classified here, not at commit time: after
+            // rapid switching AX can still list windows of the Space just
+            // left, and minimized/hidden windows stay AX-visible while their
+            // Space is not. Such windows are real otherSpace rows - shown
+            // truthfully and committed with a Space transition.
+            var seenByAX: Set<Int> = []
+            for window in AX.qualifiedWindows(pid: app.processIdentifier) {
                 hasAnyWindow = true
-                let minimized = AX.bool(window, kAXMinimizedAttribute) == true
-                let state: EntryState = hidden ? .hidden : (minimized ? .minimized : .normal)
-                if state == .minimized && !Settings.includeMinimized { continue }
-                let title = AX.string(window, kAXTitleAttribute) ?? ""
-                let windowID = AX.windowID(of: window)
-                if let windowID, !title.isEmpty {
+                if let windowID = window.windowID {
+                    seenByAX.insert(windowID)
+                }
+                if window.isMinimized && !Settings.includeMinimized { continue }
+                if let windowID = window.windowID, let title = window.title {
                     cacheTitle(title, windowID: windowID)
                 }
+                let space = window.windowID.flatMap { spaceByWindow[$0] }
+                if space != nil {
+                    hasOtherSpaceWindows = true
+                    if !Settings.includeOtherSpaces { continue }
+                }
+                let state: EntryState = space != nil ? .otherSpace
+                    : hidden ? .hidden : (window.isMinimized ? .minimized : .normal)
                 appEntries.append(ListEntry(
                     app: app,
                     appName: name,
-                    windowTitle: title.isEmpty ? nil : title,
+                    windowTitle: window.title
+                        ?? window.windowID.flatMap { cgTitles[$0] ?? titleCache[$0] },
                     state: state,
-                    axWindow: window,
-                    spaceID: nil,
-                    windowID: windowID
+                    axWindow: window.element,
+                    spaceID: space,
+                    windowID: window.windowID
                 ))
             }
 
@@ -165,11 +191,17 @@ enum AppListProvider {
             // from CGWindowList when Screen Recording permission is granted
             // (used solely for titles, never captures), else from the cache
             // of titles seen while the window was visible.
+            // Windows already emitted (or deliberately filtered) by the AX
+            // loop are skipped so a minimized/hidden window parked in a
+            // non-visible Space cannot produce a second row.
             let appWindowIDs = cgWindows[app.processIdentifier] ?? []
             for (space, windowIDs) in otherSpaceWindows {
-                let candidates = appWindowIDs.filter { windowIDs.contains($0) }
+                let candidates = appWindowIDs.filter {
+                    windowIDs.contains($0) && !seenByAX.contains($0)
+                }
                 guard !candidates.isEmpty else { continue }
                 hasAnyWindow = true
+                hasOtherSpaceWindows = true
                 guard Settings.includeOtherSpaces else { continue }
                 for windowID in candidates {
                     appEntries.append(ListEntry(
@@ -195,8 +227,26 @@ enum AppListProvider {
                     windowID: nil
                 ))
             }
+
+            // With other-Space rows filtered out, an app whose windows all
+            // live in other Spaces would otherwise vanish from the switcher
+            // entirely (it is not windowless, so the fallback above never
+            // applies). Keep it reachable with one handle-less row; commit
+            // summons it with Dock-reopen semantics.
+            if appEntries.isEmpty && hasOtherSpaceWindows {
+                appEntries.append(ListEntry(
+                    app: app,
+                    appName: name,
+                    windowTitle: nil,
+                    state: .otherSpace,
+                    axWindow: nil,
+                    spaceID: nil,
+                    windowID: nil
+                ))
+            }
             entries.append(contentsOf: appEntries)
         }
+        flushTitleCache()
         return entries
     }
 

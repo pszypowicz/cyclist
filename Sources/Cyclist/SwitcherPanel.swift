@@ -79,8 +79,15 @@ final class SwitcherPanel {
         ) { [weak self] _ in
             guard let self else { return }
             Log.write("panel: screen parameters changed, rebuilding")
+            // The notification also fires for resolution changes and display
+            // sleep/wake; a switcher session may be live, so a visible panel
+            // must survive the swap or the user keeps cycling blind.
+            let wasVisible = self.panel.isVisible
             self.panel.orderOut(nil)
             self.panel = Self.makePanel(model: self.model)
+            if wasVisible {
+                self.show()
+            }
         }
     }
 
