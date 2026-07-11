@@ -6,6 +6,7 @@ struct WindowItem {
     let title: String
     let isMinimized: Bool
     let windowID: Int?
+    let spaceID: UInt64?  // non-nil when the window lives in a non-visible Space
 }
 
 // Windows of a single app for the same-app cycling session. The AX API only
@@ -13,6 +14,13 @@ struct WindowItem {
 // other Spaces are invisible here.
 enum WindowListProvider {
     static func snapshot(for app: NSRunningApplication) -> [WindowItem] {
+        // AX can stale-list windows of a Space just left; carrying their real
+        // Space lets the commit path navigate instead of fronting an app
+        // whose window never appears.
+        var spaceByWindow: [Int: UInt64] = [:]
+        for (space, windowIDs) in Spaces.windowsByNonVisibleSpace() {
+            for id in windowIDs { spaceByWindow[id] = space }
+        }
         var items: [WindowItem] = []
         for window in AX.qualifiedWindows(pid: app.processIdentifier) {
             if window.isMinimized && !Settings.includeMinimized { continue }
@@ -23,7 +31,8 @@ enum WindowListProvider {
                 element: window.element,
                 title: window.title ?? (app.localizedName ?? "Untitled"),
                 isMinimized: window.isMinimized,
-                windowID: window.windowID
+                windowID: window.windowID,
+                spaceID: window.windowID.flatMap { spaceByWindow[$0] }
             ))
         }
         AppListProvider.flushTitleCache()

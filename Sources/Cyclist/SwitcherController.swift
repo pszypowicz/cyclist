@@ -185,16 +185,13 @@ final class SwitcherController {
         case .apps(let items, let index):
             activate(items[index])
         case .windows(let app, let items, let index):
-            navigator.cancel()
             let item = items[index]
-            focusWindow(app: app, element: item.element, windowID: item.windowID)
+            focus(app: app, element: item.element, windowID: item.windowID, spaceID: item.spaceID)
         }
     }
 
     private func activate(_ entry: ListEntry) {
         let app = entry.app
-        // A newer activation supersedes any Space navigation still in flight.
-        navigator.cancel()
         Log.write("activate: app=\(entry.appName) state=\(entry.state)"
             + " windowID=\(entry.windowID.map(String.init) ?? "-")"
             + " spaceID=\(entry.spaceID.map(String.init) ?? "-")"
@@ -203,48 +200,37 @@ final class SwitcherController {
         // Launching it again is Dock-click semantics: the app gets a reopen
         // event and recreates its window.
         if entry.state == .noWindows, let url = app.bundleURL {
+            navigator.cancel()
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
             return
         }
-        // Reaching a window in another Space needs a real Space transition
-        // (activation alone never performs one), so jump there and make the
-        // target window key on arrival. The make-key also covers same-Space
-        // rows: since macOS 14, NSRunningApplication.activate is an advisory
-        // request the system ignores from here, so it cannot move activation
-        // (or the menu bar) by itself.
-        if entry.state == .otherSpace {
-            let pid = app.processIdentifier
-            let windowID = entry.windowID
-            if let spaceID = entry.spaceID,
-               navigator.begin(to: spaceID, onArrival: windowID.map { wid in
-                   { Spaces.makeKey(pid: pid, windowID: wid) }
-               }) {
-                Log.write("navigate: \(entry.appName) space=\(spaceID)")
-                return
-            }
-            Log.write("otherSpace navigation unavailable for \(entry.appName)")
-        }
+        focus(app: app, element: entry.axWindow, windowID: entry.windowID, spaceID: entry.spaceID)
+    }
+
+    // Single focus path for every real-window row: unhide the app, jump to
+    // the window's non-visible Space when the provider resolved one (making
+    // the window key on arrival), else focus directly. Reaching a window in
+    // another Space needs a real Space transition - activation alone never
+    // performs one. Falls back to a direct focus when navigation is refused.
+    private func focus(app: NSRunningApplication, element: AXUIElement?, windowID: Int?, spaceID: UInt64?) {
+        // A newer activation supersedes any Space navigation still in flight.
+        navigator.cancel()
         if app.isHidden {
             app.unhide()
         }
-        // Rapid switching can leave AX still listing windows of the Space
-        // just left, so a "normal" row may actually live in a non-visible
-        // Space; focusing it alone would move the menu bar without the
-        // Space. Verify real Space membership and reroute.
-        if entry.state == .normal, let windowID = entry.windowID {
-            for (space, windowIDs) in Spaces.windowsByNonVisibleSpace()
-            where windowIDs.contains(windowID) {
-                Log.write("activate: window \(windowID) is actually in space \(space), navigating")
-                let pid = app.processIdentifier
-                _ = navigator.begin(to: space) {
-                    Spaces.makeKey(pid: pid, windowID: windowID)
-                }
-                return
-            }
+        if let spaceID, let windowID,
+           navigator.begin(to: spaceID, onArrival: { [weak self] in
+               self?.focusWindow(app: app, element: element, windowID: windowID)
+           }) {
+            Log.write("navigate: pid=\(app.processIdentifier) space=\(spaceID)")
+            return
         }
-        focusWindow(app: app, element: entry.axWindow, windowID: entry.windowID)
+        if spaceID != nil {
+            Log.write("otherSpace navigation unavailable for pid=\(app.processIdentifier); focusing directly")
+        }
+        focusWindow(app: app, element: element, windowID: windowID)
     }
 
     private func focusWindow(app: NSRunningApplication, element: AXUIElement?, windowID: Int?) {
