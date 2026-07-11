@@ -41,10 +41,20 @@ enum AppListProvider {
     private static let cacheBootKey = "titleCacheBootTime"
 
     private static var titleCache: [Int: String] = loadCache()
+    private static var cacheDirty = false
 
+    // The single mutation point of the cache. Persistence is deferred to
+    // flushTitleCache so a snapshot or harvest writes UserDefaults at most
+    // once instead of re-serializing the whole cache per new title.
     static func cacheTitle(_ title: String, windowID: Int) {
         guard titleCache[windowID] != title else { return }
         titleCache[windowID] = title
+        cacheDirty = true
+    }
+
+    static func flushTitleCache() {
+        guard cacheDirty else { return }
+        cacheDirty = false
         persistCache()
     }
 
@@ -65,20 +75,15 @@ enum AppListProvider {
         if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier {
             pids.insert(front)
         }
-        var changed = false
         for pid in pids {
             guard NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular else { continue }
             for window in AX.windows(pid: pid) {
                 guard let windowID = AX.windowID(of: window),
-                      let title = AX.string(window, kAXTitleAttribute), !title.isEmpty,
-                      titleCache[windowID] != title else { continue }
-                titleCache[windowID] = title
-                changed = true
+                      let title = AX.string(window, kAXTitleAttribute), !title.isEmpty else { continue }
+                cacheTitle(title, windowID: windowID)
             }
         }
-        if changed {
-            persistCache()
-        }
+        flushTitleCache()
     }
 
     private static func bootTime() -> Double {
@@ -190,6 +195,7 @@ enum AppListProvider {
             }
             entries.append(contentsOf: appEntries)
         }
+        flushTitleCache()
         return entries
     }
 

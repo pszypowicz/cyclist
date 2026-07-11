@@ -26,6 +26,7 @@ enum WindowListProvider {
                 windowID: window.windowID
             ))
         }
+        AppListProvider.flushTitleCache()
         return items
     }
 }
