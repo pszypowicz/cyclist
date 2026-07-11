@@ -13,10 +13,25 @@ final class SwitcherController {
     private let swipeDetector = SwipeDetector()
 
     private enum Session {
+        // Snapshot still building off the tap callback. `presses` records
+        // each Tab/backtick press as its Shift state (never empty) so the
+        // completion replays them through the same start-index and step
+        // logic a live session uses.
+        case pendingApps(presses: [Bool])
+        case pendingWindows(NSRunningApplication, presses: [Bool])
         case apps([ListEntry], index: Int)
         case windows(NSRunningApplication, [WindowItem], index: Int)
     }
     private var session: Session?
+    // Guards pending completions: a snapshot that resolves after its session
+    // was cancelled or superseded must not apply.
+    private var snapshotGeneration = 0
+    // Pending sessions whose Cmd was already released: they commit when
+    // their snapshot arrives. Kept outside `session` so the release keeps
+    // its usual meaning - the session is over, Esc passes through again,
+    // and the next press starts a fresh session instead of folding into a
+    // finished one.
+    private var pendingCommits: [(generation: Int, session: Session)] = []
     private var showPanelWork: DispatchWorkItem?
 
     // Fired when the key tap dies (e.g. Accessibility revoked at runtime);
@@ -86,8 +101,12 @@ final class SwitcherController {
     }
 
     private func handleFlagsChanged(_ event: CGEvent) {
-        guard session != nil else { return }
-        if !event.flags.contains(.maskCommand) {
+        guard let session, !event.flags.contains(.maskCommand) else { return }
+        switch session {
+        case .pendingApps, .pendingWindows:
+            pendingCommits.append((snapshotGeneration, session))
+            self.session = nil
+        case .apps, .windows:
             commit()
         }
     }
@@ -98,25 +117,26 @@ final class SwitcherController {
             let next = step(index, count: items.count, backward: backward)
             session = .apps(items, index: next)
             panel.select(index: next)
-        case .windows:
+        case .pendingApps(let presses):
+            // A press while the snapshot builds advances the pending
+            // selection.
+            session = .pendingApps(presses: presses + [backward])
+        case .windows, .pendingWindows:
             break
         case nil:
-            let items = AppListProvider.snapshot(mru: mru)
-            guard !items.isEmpty else { return }
-            // A quick tap should land on the previous app, not on another
-            // window of the frontmost app, whose windows head the MRU list.
-            let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
-            let firstOtherApp = items.firstIndex { $0.app.processIdentifier != front }
-            let forwardStart = firstOtherApp ?? (items.count > 1 ? 1 : 0)
-            let start = backward ? items.count - 1 : forwardStart
-            session = .apps(items, index: start)
-            presentPanel(
-                rows: items.map {
-                    SwitcherRow(icon: $0.app.icon, title: $0.appName, subtitle: $0.windowTitle,
-                                annotation: annotation(for: $0))
-                },
-                selected: start
-            )
+            // The snapshot's AX sweep can take long enough to get the tap
+            // disabled (and stall all keyboard input behind the callback),
+            // so it runs after the callback returns; presses and the Cmd
+            // release accumulate on the pending session meanwhile. Snapshots
+            // are dispatched in session order, so a fresh session started
+            // right after a quick tap resolves after the tap's commit.
+            session = .pendingApps(presses: [backward])
+            snapshotGeneration += 1
+            let generation = snapshotGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.finishAppsSnapshot(AppListProvider.snapshot(mru: self.mru), generation: generation)
+            }
         }
     }
 
@@ -126,22 +146,100 @@ final class SwitcherController {
             let next = step(index, count: items.count, backward: backward)
             session = .windows(app, items, index: next)
             panel.select(index: next)
-        case .apps:
+        case .pendingWindows(let app, let presses):
+            session = .pendingWindows(app, presses: presses + [backward])
+        case .apps, .pendingApps:
             break
         case nil:
             guard let app = NSWorkspace.shared.frontmostApplication else { return }
-            let items = WindowListProvider.snapshot(for: app)
-            guard !items.isEmpty else { return }
-            let start = startIndex(count: items.count, backward: backward)
-            session = .windows(app, items, index: start)
-            presentPanel(
-                rows: items.map {
-                    SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
-                                annotation: $0.isMinimized ? "minimized" : nil)
-                },
-                selected: start
-            )
+            session = .pendingWindows(app, presses: [backward])
+            snapshotGeneration += 1
+            let generation = snapshotGeneration
+            DispatchQueue.main.async { [weak self] in
+                self?.finishWindowsSnapshot(WindowListProvider.snapshot(for: app), generation: generation)
+            }
         }
+    }
+
+    private func finishAppsSnapshot(_ items: [ListEntry], generation: Int) {
+        // Cmd already released: a quick tap commits straight from here,
+        // never showing the panel.
+        if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
+            let pending = pendingCommits.remove(at: pendingIndex)
+            guard case .pendingApps(let presses) = pending.session else { return }
+            guard !items.isEmpty else {
+                Log.write("apps snapshot empty; consumed Cmd+Tab dropped")
+                return
+            }
+            activate(items[replay(presses, count: items.count,
+                                  initial: initialAppsIndex(items: items, backward: presses[0]))])
+            return
+        }
+        guard generation == snapshotGeneration,
+              case .pendingApps(let presses) = session else { return }
+        guard !items.isEmpty else {
+            Log.write("apps snapshot empty; consumed Cmd+Tab dropped")
+            session = nil
+            return
+        }
+        let index = replay(presses, count: items.count,
+                           initial: initialAppsIndex(items: items, backward: presses[0]))
+        session = .apps(items, index: index)
+        presentPanel(
+            rows: items.map {
+                SwitcherRow(icon: $0.app.icon, title: $0.appName, subtitle: $0.windowTitle,
+                            annotation: annotation(for: $0))
+            },
+            selected: index
+        )
+    }
+
+    private func finishWindowsSnapshot(_ items: [WindowItem], generation: Int) {
+        if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
+            let pending = pendingCommits.remove(at: pendingIndex)
+            guard case .pendingWindows(let app, let presses) = pending.session else { return }
+            guard !items.isEmpty else {
+                Log.write("window snapshot empty; consumed Cmd+` dropped")
+                return
+            }
+            let item = items[replay(presses, count: items.count,
+                                    initial: startIndex(count: items.count, backward: presses[0]))]
+            focus(app: app, element: item.element, windowID: item.windowID, spaceID: item.spaceID)
+            return
+        }
+        guard generation == snapshotGeneration,
+              case .pendingWindows(let app, let presses) = session else { return }
+        guard !items.isEmpty else {
+            Log.write("window snapshot empty; consumed Cmd+` dropped")
+            session = nil
+            return
+        }
+        let index = replay(presses, count: items.count,
+                           initial: startIndex(count: items.count, backward: presses[0]))
+        session = .windows(app, items, index: index)
+        presentPanel(
+            rows: items.map {
+                SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
+                            annotation: $0.isMinimized ? "minimized" : nil)
+            },
+            selected: index
+        )
+    }
+
+    // The first press picked the start index; each further press steps.
+    private func replay(_ presses: [Bool], count: Int, initial: Int) -> Int {
+        presses.dropFirst().reduce(initial) { index, backward in
+            step(index, count: count, backward: backward)
+        }
+    }
+
+    // A quick tap should land on the previous app, not on another window of
+    // the frontmost app, whose windows head the MRU list.
+    private func initialAppsIndex(items: [ListEntry], backward: Bool) -> Int {
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let firstOtherApp = items.firstIndex { $0.app.processIdentifier != front }
+        let forwardStart = firstOtherApp ?? (items.count > 1 ? 1 : 0)
+        return backward ? items.count - 1 : forwardStart
     }
 
     private func startIndex(count: Int, backward: Bool) -> Int {
@@ -186,12 +284,17 @@ final class SwitcherController {
 
     private func commit() {
         guard let session else { return }
-        self.session = nil
-        dismissPanel()
         switch session {
+        case .pendingApps, .pendingWindows:
+            // A pending session commits from its snapshot completion.
+            return
         case .apps(let items, let index):
+            self.session = nil
+            dismissPanel()
             activate(items[index])
         case .windows(let app, let items, let index):
+            self.session = nil
+            dismissPanel()
             let item = items[index]
             focus(app: app, element: item.element, windowID: item.windowID, spaceID: item.spaceID)
         }
