@@ -128,15 +128,17 @@ enum Spaces {
             Log.write("makeKey: GetProcessForPID(\(pid)) failed: \(psnErr)")
             return
         }
-        var wid = UInt32(windowID)
+        let wid = UInt32(windowID)
         let frontErr = setFront(&psn, wid, 0x200)  // kCPSUserGenerated
         Log.write("makeKey: pid=\(pid) wid=\(wid) setFront=\(frontErr)")
-        var point = CGPoint(x: -1, y: -1)
+        let point = CGPoint(x: -1, y: -1)
         var bytes = [UInt8](repeating: 0, count: 0x100)
         bytes[0x04] = 0xf8
         bytes[0x3a] = 0x10
-        memcpy(&bytes[0x3c], &wid, MemoryLayout<UInt32>.size)
-        memcpy(&bytes[0x20], &point, MemoryLayout<CGPoint>.size)
+        bytes.withUnsafeMutableBytes {
+            $0.storeBytes(of: wid, toByteOffset: 0x3c, as: UInt32.self)
+            $0.storeBytes(of: point, toByteOffset: 0x20, as: CGPoint.self)
+        }
         bytes[0x08] = 0x01  // kCGEventLeftMouseDown
         _ = postEvent(&psn, &bytes)
         bytes[0x08] = 0x02  // kCGEventLeftMouseUp
