@@ -151,6 +151,7 @@ enum AppListProvider {
             let name = app.localizedName ?? "Unknown"
             var appEntries: [ListEntry] = []
             var hasAnyWindow = false
+            var hasOtherSpaceWindows = false
 
             // Space membership is classified here, not at commit time: after
             // rapid switching AX can still list windows of the Space just
@@ -168,7 +169,10 @@ enum AppListProvider {
                     cacheTitle(title, windowID: windowID)
                 }
                 let space = window.windowID.flatMap { spaceByWindow[$0] }
-                if space != nil && !Settings.includeOtherSpaces { continue }
+                if space != nil {
+                    hasOtherSpaceWindows = true
+                    if !Settings.includeOtherSpaces { continue }
+                }
                 let state: EntryState = space != nil ? .otherSpace
                     : hidden ? .hidden : (window.isMinimized ? .minimized : .normal)
                 appEntries.append(ListEntry(
@@ -197,6 +201,7 @@ enum AppListProvider {
                 }
                 guard !candidates.isEmpty else { continue }
                 hasAnyWindow = true
+                hasOtherSpaceWindows = true
                 guard Settings.includeOtherSpaces else { continue }
                 for windowID in candidates {
                     appEntries.append(ListEntry(
@@ -217,6 +222,23 @@ enum AppListProvider {
                     appName: name,
                     windowTitle: nil,
                     state: .noWindows,
+                    axWindow: nil,
+                    spaceID: nil,
+                    windowID: nil
+                ))
+            }
+
+            // With other-Space rows filtered out, an app whose windows all
+            // live in other Spaces would otherwise vanish from the switcher
+            // entirely (it is not windowless, so the fallback above never
+            // applies). Keep it reachable with one handle-less row; commit
+            // summons it with Dock-reopen semantics.
+            if appEntries.isEmpty && hasOtherSpaceWindows {
+                appEntries.append(ListEntry(
+                    app: app,
+                    appName: name,
+                    windowTitle: nil,
+                    state: .otherSpace,
                     axWindow: nil,
                     spaceID: nil,
                     windowID: nil

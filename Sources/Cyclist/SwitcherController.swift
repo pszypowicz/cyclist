@@ -196,10 +196,13 @@ final class SwitcherController {
             + " windowID=\(entry.windowID.map(String.init) ?? "-")"
             + " spaceID=\(entry.spaceID.map(String.init) ?? "-")"
             + " from=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")")
-        // Plain activation does nothing visible for an app with no windows.
-        // Launching it again is Dock-click semantics: the app gets a reopen
-        // event and recreates its window.
-        if entry.state == .noWindows, let url = app.bundleURL {
+        // Plain activation does nothing visible for an app with no windows,
+        // and a row without any window handle (an other-Space app shown only
+        // as a reachability fallback) has nothing to focus or navigate to.
+        // Launching again is Dock-click semantics: the app gets a reopen
+        // event and brings its own windows along.
+        if entry.state == .noWindows || (entry.axWindow == nil && entry.windowID == nil),
+           let url = app.bundleURL {
             navigator.cancel()
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
