@@ -13,6 +13,13 @@ import AppKit
 // a transition is in flight, when the reported current Space can be garbage
 // (it once read as an unrelated Space and faked an arrival mid-route).
 final class SpaceNavigator {
+    // First arrival check after a post: unloaded, the Space bookkeeping
+    // reflects a swipe ~150-200ms after posting, and checking early cuts
+    // the gap until the arrival focus makes the target window key. Early
+    // polling is safe because a swipe that has not landed yet just
+    // reschedules (the outstandingPost guard); those rechecks and retry
+    // ticks stay on the slower verifyInterval cadence.
+    private let earlyVerifyInterval: TimeInterval = 0.15
     private let verifyInterval: TimeInterval = 0.4
     private let maxAttempts = 3
     // The Dock cannot absorb a sustained stream of synthetic dock swipes
@@ -132,7 +139,7 @@ final class SpaceNavigator {
         recentPosts.append(Date())
         outstandingPost = target
         inFlightChecks = 0
-        schedule(after: verifyInterval)
+        schedule(after: earlyVerifyInterval)
     }
 
     private func schedule(after interval: TimeInterval) {
