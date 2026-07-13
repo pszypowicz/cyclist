@@ -10,7 +10,6 @@ final class SwitcherController {
     private let panel = SwitcherPanel()
     private let navigator = SpaceNavigator()
     private lazy var chain = ChainNavigator(navigator: navigator)
-    private let swipeDetector = SwipeDetector()
 
     private enum Session {
         // Snapshot still building off the tap callback. `presses` records
@@ -52,16 +51,8 @@ final class SwitcherController {
         tap.onFlagsChanged = { [weak self] event in
             self?.handleFlagsChanged(event)
         }
-        tap.onGesture = { [weak self] event in
-            self?.swipeDetector.handle(event)
-        }
         tap.onInvalidated = { [weak self] in
             self?.onTapInvalidated?()
-        }
-        // Natural-scroll convention, matching the trackpad: fingers left
-        // moves forward through the chain, fingers right moves back.
-        swipeDetector.onSwipe = { [weak self] fingersLeft in
-            DispatchQueue.main.async { self?.chain.navigate(left: !fingersLeft) }
         }
     }
 
