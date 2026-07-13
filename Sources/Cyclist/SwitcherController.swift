@@ -324,6 +324,11 @@ final class SwitcherController {
         if app.isHidden {
             app.unhide()
         }
+        // A deterministic AltTab-style focus (setFront+click, macOS performs
+        // the transition) does NOT work on macOS 26: the app becomes active
+        // but the display never leaves the current Space (verified live
+        // against a fullscreen target). Reaching a window in another Space
+        // needs the real swipe transition below.
         if let spaceID, let windowID,
            navigator.begin(to: spaceID, onArrival: { [weak self] in
                self?.focusWindow(app: app, element: element, windowID: windowID)
