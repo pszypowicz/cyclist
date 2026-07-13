@@ -9,7 +9,7 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 - Replaces the native Cmd+Tab switcher with a vertical, text-only list in most-recently-used app order. Every window gets its own row (`App - Window title`), so two Safari windows are two entries.
 - Windows in other Spaces (including native fullscreen) get their own rows too. With Screen Recording permission granted their titles are live; without it, each row shows the last title Cyclist saw while that window was visible. Selecting a row jumps straight to that Space.
 - A separate binding (Cmd+`) cycles through the windows of the frontmost app, including minimized ones - something the native window cycler skips.
-- Ctrl+Left/Right and a 3-finger horizontal trackpad swipe walk the native Spaces of the primary display in Mission Control order - user desktops and fullscreen Spaces alike - instantly and without animation. Arriving on a desktop focuses its top window, so leaving a fullscreen app always lands somewhere concrete.
+- Ctrl+Left/Right walks the native Spaces of the primary display in Mission Control order - user desktops and fullscreen Spaces alike - instantly and without animation. Arriving on a desktop focuses its top window, so leaving a fullscreen app always lands somewhere concrete.
 - Four independent settings control what shows up in the list:
   - include **hidden** apps (Cmd+H)
   - include **minimized** apps (all windows in the Dock)
@@ -27,7 +27,6 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 | Esc (while open)    | Cancel                                        |
 | Release Cmd         | Switch to the selected item                   |
 | Ctrl+Left / Right   | Previous / next workspace or fullscreen Space |
-| 3-finger swipe      | Walk the same workspace chain                 |
 
 Shortcuts are hardcoded in this release and use physical key positions (Tab and the key left of 1), so they may land oddly on some non-US layouts.
 

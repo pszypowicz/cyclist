@@ -1,7 +1,7 @@
 import AppKit
 
-// Ctrl+Left/Right and the 3-finger swipe walk the native Spaces of the
-// active display in Mission Control order - user desktops and fullscreen
+// Ctrl+Left/Right walks the native Spaces of the active display in
+// Mission Control order - user desktops and fullscreen
 // Spaces alike - with instant, animation-free jumps. Arriving on a user
 // Space focuses its top window, so stepping out of a fullscreen app always
 // lands on something concrete instead of leaving the fullscreen app's menu
