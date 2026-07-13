@@ -46,8 +46,6 @@ open /Applications/Cyclist.app
 
 On first launch Cyclist prompts for Accessibility permission and activates itself once granted. It lives in the menu bar (no Dock icon); the menu holds the list settings, a native Launch at Login toggle (registers with System Settings > General > Login Items), and Quit.
 
-Cyclist also exposes its instant Space-switching engine as a CLI for other tools (e.g. a Hammerspoon workspace chain): `Cyclist --goto-space <space-id>` switches and exits; see `--help`.
-
 The build script signs with your "Apple Development" certificate when one is present so the Accessibility grant survives rebuilds. See `scripts/build-app.sh --help` for options.
 
 ## Known limitations

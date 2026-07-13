@@ -1,20 +1,37 @@
 import Foundation
+import os
 
-// Beta diagnostics. NSLog from this app does not reliably reach the unified
-// log, so a plain file it is: ~/Library/Logs/Cyclist.log
+// Unified logging, subsystem = the bundle id. Operational lines log at
+// default level and are always persisted. Diagnostic lines log at debug
+// level, which the logging system discards for free until collection is
+// armed:
+//   log stream --level debug --predicate 'subsystem == "io.github.pszypowicz.Cyclist"'
+// or persistently:
+//   sudo log config --subsystem io.github.pszypowicz.Cyclist --mode "level:debug,persist:debug"
+// Diagnostic-only WORK (pixel checks and the like) must also gate on
+// `debugEnabled` so it costs nothing while collection is off.
 enum Log {
-    private static let url = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Logs/Cyclist.log")
-    private static let timestamp = ISO8601DateFormatter()
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "io.github.pszypowicz.Cyclist"
+    private static let appLog = OSLog(subsystem: subsystem, category: "app")
+    private static let diagnosticsLog = OSLog(subsystem: subsystem, category: "diagnostics")
+    private static let app = Logger(appLog)
+    private static let diagnostics = Logger(diagnosticsLog)
+
+    static var debugEnabled: Bool { diagnosticsLog.isEnabled(type: .debug) }
 
     static func write(_ message: String) {
-        let line = "\(timestamp.string(from: Date())) \(message)\n"
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
-            handle.seekToEndOfFile()
-            handle.write(Data(line.utf8))
-        } else {
-            try? line.write(to: url, atomically: true, encoding: .utf8)
-        }
+        app.log("\(message, privacy: .public)")
+    }
+
+    // The autoclosure keeps message construction free while debug
+    // collection is off.
+    static func debug(_ message: @autoclosure () -> String) {
+        guard debugEnabled else { return }
+        let text = message()
+        diagnostics.debug("\(text, privacy: .public)")
+    }
+
+    static func error(_ message: String) {
+        diagnostics.error("\(message, privacy: .public)")
     }
 }

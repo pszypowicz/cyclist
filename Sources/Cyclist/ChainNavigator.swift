@@ -20,8 +20,12 @@ final class ChainNavigator {
             Log.write("chain: no display info")
             return
         }
-        guard let currentIndex = display.order.firstIndex(of: display.current) else {
-            Log.write("chain: current space \(display.current) not in \(display.order)")
+        // Step from the in-flight destination when navigation is already
+        // running: rapid presses then merge into one farther jump for the
+        // navigator to pace, instead of stacking swipes.
+        let base = navigator.pendingTarget ?? display.current
+        guard let currentIndex = display.order.firstIndex(of: base) else {
+            Log.write("chain: space \(base) not in \(display.order)")
             return
         }
         let targetIndex = currentIndex + (left ? -1 : 1)
@@ -30,7 +34,7 @@ final class ChainNavigator {
             return
         }
         let target = display.order[targetIndex]
-        Log.write("chain: \(left ? "left" : "right") \(display.current) -> \(target)")
+        Log.write("chain: \(left ? "left" : "right") \(base) -> \(target)")
         let arrival: (() -> Void)? = display.types[target] == 0
             ? { Self.focusTopUserWindow() }
             : nil

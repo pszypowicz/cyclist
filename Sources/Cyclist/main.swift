@@ -1,34 +1,6 @@
 import AppKit
 
-// CLI mode: post the instant Space-switch gestures and exit, without
-// starting the app. Lets other tools (e.g. a Hammerspoon workspace chain)
-// reuse Cyclist's switching engine. CGEvent posting is authorized through
-// the caller's Accessibility grant (child processes inherit the invoking
-// app's TCC responsibility).
 let arguments = CommandLine.arguments
-if let flagIndex = arguments.firstIndex(of: "--goto-space") {
-    guard arguments.count > flagIndex + 1, let spaceID = UInt64(arguments[flagIndex + 1]) else {
-        FileHandle.standardError.write(Data("usage: Cyclist --goto-space <space-id>\n".utf8))
-        exit(2)
-    }
-    // The dock-swipe gestures act on the active display only; computing
-    // steps from another display's Space order would displace the wrong
-    // display, so cross-display targets are refused instead.
-    guard let info = Spaces.activeDisplayInfo(),
-          let targetIndex = info.order.firstIndex(of: spaceID),
-          let currentIndex = info.order.firstIndex(of: info.current) else {
-        let message = Spaces.orderInfo(containing: spaceID) != nil
-            ? "Cyclist: Space \(spaceID) is on an inactive display; switching only works on the active display\n"
-            : "Cyclist: unknown Space id \(spaceID)\n"
-        FileHandle.standardError.write(Data(message.utf8))
-        exit(1)
-    }
-    let steps = targetIndex - currentIndex
-    if steps != 0 {
-        Spaces.postDockSwipes(right: steps > 0, steps: abs(steps))
-    }
-    exit(0)
-}
 if arguments.contains("-h") || arguments.contains("--help") {
     print("""
     Cyclist - text-only Cmd+Tab switcher for macOS.
@@ -36,10 +8,6 @@ if arguments.contains("-h") || arguments.contains("--help") {
     Run without arguments to start the app (menu bar, keyboard hooks).
 
     Flags:
-      --goto-space <space-id>  Switch to the given native Space instantly
-                               (CGS Space id, as reported by the private
-                               CGSCopyManagedDisplaySpaces API or
-                               Hammerspoon's hs.spaces) and exit.
       -h, --help               Show this help.
     """)
     exit(0)

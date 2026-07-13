@@ -117,16 +117,6 @@ enum Spaces {
         return id == 0 ? nil : id
     }
 
-    // Same, for the display whose Space order contains the given Space.
-    static func orderInfo(containing spaceID: UInt64) -> DisplayInfo? {
-        for display in managedDisplays() {
-            if let info = parse(display), info.order.contains(spaceID) {
-                return info
-            }
-        }
-        return nil
-    }
-
     // Window IDs actually present in each Space that exists but is not
     // currently shown on any display. The per-Space window list is the
     // authority here: CGSCopySpacesForWindows keeps reporting a stale Space
@@ -196,15 +186,25 @@ enum Spaces {
 
     // Instant Space switch: synthetic trackpad dock-swipe gestures with
     // high velocity, so the Dock switches with no animation (~40ms
-    // observed). Undocumented CGEvent field indices posted through the
-    // public CGEventPost; the exact encoding follows Space Rabbit
+    // observed). One gesture pair per step, with velocity scaled by the
+    // step count.
+    static func postDockSwipes(right: Bool, steps: Int) {
+        let count = max(1, steps)
+        let progress = right ? 2.0 : -2.0
+        let velocity = (right ? 400.0 : -400.0) * Double(count)
+        for _ in 0..<count {
+            postDockSwipePair(right: right, progress: progress, velocity: velocity)
+        }
+    }
+
+    // Undocumented CGEvent field indices posted through the public
+    // CGEventPost; the exact encoding follows Space Rabbit
     // (github.com/Tahul/space-rabbit): direction as a plain 0/1 integer in
     // the flag-bits field, Began+Ended phases only, progress and velocity
-    // on Ended, and one gesture pair per step with velocity scaled by the
-    // step count. Unlike the iss/Spaceman float-bit-pattern encoding, this
+    // on Ended. Unlike the iss/Spaceman float-bit-pattern encoding, this
     // shape also switches between two fullscreen Spaces and chains
     // multi-step jumps with no delay.
-    static func postDockSwipes(right: Bool, steps: Int) {
+    private static func postDockSwipePair(right: Bool, progress: Double, velocity: Double) {
         let eventTypeField = CGEventField(rawValue: 55)!       // real CGS event type
         let gestureHIDTypeField = CGEventField(rawValue: 110)! // IOHIDEventType
         let scrollYField = CGEventField(rawValue: 119)!
@@ -216,10 +216,7 @@ enum Spaces {
         let flagBitsField = CGEventField(rawValue: 135)!
         let zoomDeltaXField = CGEventField(rawValue: 139)!
 
-        let count = max(1, steps)
         let flagDirection: Int64 = right ? 1 : 0
-        let progress = right ? 2.0 : -2.0
-        let velocity = (right ? 400.0 : -400.0) * Double(count)
 
         func postPair(phase: Int64) {
             guard let dockEvent = CGEvent(source: nil),
@@ -242,10 +239,8 @@ enum Spaces {
             gestureEvent.post(tap: .cgSessionEventTap)
         }
 
-        for _ in 0..<count {
-            postPair(phase: 1)  // began
-            postPair(phase: 4)  // ended
-        }
+        postPair(phase: 1)  // began
+        postPair(phase: 4)  // ended
     }
 
 }
