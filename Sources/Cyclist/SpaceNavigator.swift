@@ -9,9 +9,15 @@ import AppKit
 // Space state before acting, and on verified arrival the target window is
 // made key.
 //
-// activeSpaceDidChangeNotification is deliberately not used: it fires while
-// a transition is in flight, when the reported current Space can be garbage
-// (it once read as an unrelated Space and faked an arrival mid-route).
+// activeSpaceDidChangeNotification serves only as a wake-up hint that runs
+// the next check sooner; it is never trusted as arrival truth, because it
+// fires while a transition is in flight, when the reported current Space
+// can be garbage. Every wake goes through the same guarded re-read: arrival
+// is concluded only after the outstanding posted swipe has observably
+// landed. Timers remain as the fallback for missed notifications. The swipe
+// pacing floors below stay time-based because no settled-signal exists:
+// SLSManagedDisplayIsAnimating never fires for these instant transitions,
+// and verified bookkeeping arrival precedes compositor safety.
 final class SpaceNavigator {
     // First arrival check after a post: unloaded, the Space bookkeeping
     // reflects a swipe ~150-200ms after posting, and checking early cuts
@@ -52,9 +58,30 @@ final class SpaceNavigator {
     private var outstandingPost: UInt64?
     private var inFlightChecks = 0
 
+    private var spaceChangeObserver: NSObjectProtocol?
+
     // The in-flight destination, so callers can step relative to where
     // navigation is already headed instead of the (stale) current Space.
     var pendingTarget: UInt64? { target }
+
+    init() {
+        spaceChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.target != nil else { return }
+            Log.debug("navigator: woken by space-change notification")
+            self.stepWork?.cancel()
+            self.step()
+        }
+    }
+
+    deinit {
+        if let spaceChangeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserver)
+        }
+    }
 
     // Returns false when the active display's Space order does not contain
     // the target: the dock swipes act on the active display only, so a
