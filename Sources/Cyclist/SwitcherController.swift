@@ -38,6 +38,12 @@ final class SwitcherController {
     // fail up to its timeout later) once a newer activation happened;
     // native arrivals are covered by navigator.cancel() instead.
     private var activationGeneration = 0
+    // NSWorkspace's frontmost app lags a makeKey/AeroSpace activation by
+    // ~0.1-1s. A press inside that window would classify rows against the
+    // app just left: a quick Cmd+Tab re-commits the very window the user
+    // is on, and Cmd+` lists the wrong app's windows. Right after our own
+    // commit, we are the fresher source of truth.
+    private var lastCommit: (app: NSRunningApplication, at: Date)?
 
     // Fired when the key tap dies (e.g. Accessibility revoked at runtime);
     // the owner polls for the grant and calls start() to rebuild.
@@ -156,7 +162,7 @@ final class SwitcherController {
         case .apps, .pendingApps:
             break
         case nil:
-            guard let app = NSWorkspace.shared.frontmostApplication else { return }
+            guard let app = frontmostForSessions() else { return }
             session = .pendingWindows(app, presses: [backward])
             snapshotGeneration += 1
             let generation = snapshotGeneration
@@ -241,10 +247,17 @@ final class SwitcherController {
         }
     }
 
+    private func frontmostForSessions() -> NSRunningApplication? {
+        if let lastCommit, Date().timeIntervalSince(lastCommit.at) < 1.5 {
+            return lastCommit.app
+        }
+        return NSWorkspace.shared.frontmostApplication
+    }
+
     // A quick tap should land on the previous app, not on another window of
     // the frontmost app, whose windows head the MRU list.
     private func initialAppsIndex(items: [ListEntry], backward: Bool) -> Int {
-        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let front = frontmostForSessions()?.processIdentifier
         let firstOtherApp = items.firstIndex { $0.app.processIdentifier != front }
         let forwardStart = firstOtherApp ?? (items.count > 1 ? 1 : 0)
         return backward ? items.count - 1 : forwardStart
@@ -323,6 +336,7 @@ final class SwitcherController {
         if entry.state == .noWindows || (entry.axWindow == nil && entry.windowID == nil),
            let url = app.bundleURL {
             navigator.cancel()
+            lastCommit = (app, Date())
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
@@ -342,6 +356,7 @@ final class SwitcherController {
             }
             Log.write("activate: aerospace focus wid=\(windowID) workspace=\(workspace)")
             recency.noteFocus(windowID: windowID, source: "commit-aerospace")
+            lastCommit = (app, Date())
             activationGeneration += 1
             let generation = activationGeneration
             aerospace.focusWindow(windowID) { [weak self] ok in
@@ -364,6 +379,7 @@ final class SwitcherController {
         navigator.cancel()
         chain.cancelPending()
         activationGeneration += 1
+        lastCommit = (app, Date())
         // Record at commit intent, not on arrival focus: didActivate
         // propagates ~0.1-1s after a switch, but a quick tap lets the user
         // reopen the switcher within ~200ms and that snapshot must already
