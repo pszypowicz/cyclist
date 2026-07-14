@@ -126,9 +126,15 @@ final class SwitcherController {
             session = .pendingApps(presses: [backward])
             snapshotGeneration += 1
             let generation = snapshotGeneration
+            // Freshen the workspace cache for commit time and the next
+            // session; the snapshot below reads whatever is cached now.
+            aerospace.refresh()
+            aerospace.kick()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.finishAppsSnapshot(AppListProvider.snapshot(mru: self.mru), generation: generation)
+                self.finishAppsSnapshot(
+                    AppListProvider.snapshot(mru: self.mru, aerospace: self.aerospace),
+                    generation: generation)
             }
         }
     }
@@ -251,6 +257,7 @@ final class SwitcherController {
         case .hidden: return "hidden"
         case .minimized: return "minimized"
         case .otherSpace: return "other space"
+        case .hiddenWorkspace: return "workspace \(entry.aerospaceWorkspace ?? "?")"
         case .noWindows: return "no windows"
         }
     }
@@ -310,6 +317,24 @@ final class SwitcherController {
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+            return
+        }
+        // A window in a hidden AeroSpace workspace sits on THIS native
+        // Space, parked off-screen; one AeroSpace command switches the
+        // workspace and focuses it. The window is real either way, so if
+        // the client died since the snapshot, the plain focus path still
+        // reaches it (AeroSpace follows externally focused windows when it
+        // comes back).
+        if let workspace = entry.aerospaceWorkspace, let windowID = entry.windowID, aerospace.isActive {
+            navigator.cancel()
+            if app.isHidden {
+                app.unhide()
+            }
+            Log.write("activate: aerospace focus wid=\(windowID) workspace=\(workspace)")
+            aerospace.focusWindow(windowID) { [weak self] ok in
+                guard let self, !ok else { return }
+                self.focusWindow(app: app, element: entry.axWindow, windowID: windowID)
+            }
             return
         }
         focus(app: app, element: entry.axWindow, windowID: entry.windowID, spaceID: entry.spaceID)
