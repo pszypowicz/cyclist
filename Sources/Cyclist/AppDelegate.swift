@@ -2,6 +2,7 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = StatusItemController()
+    private let aerospace = AeroSpaceClient()
     private var mru: MRUTracker!
     private var controller: SwitcherController!
     private var permissionTimer: Timer?
@@ -9,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Settings.registerDefaults()
         AX.configureGlobalTimeout()
+        aerospace.start()
         mru = MRUTracker()
         controller = SwitcherController(mru: mru)
         controller.onTapInvalidated = { [weak self] in self?.scheduleRecovery() }
