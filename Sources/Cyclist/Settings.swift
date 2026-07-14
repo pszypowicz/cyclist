@@ -5,6 +5,7 @@ enum Settings {
     static let includeMinimizedKey = "includeMinimized"
     static let includeOtherSpacesKey = "includeOtherSpaces"
     static let includeNoWindowsKey = "includeNoWindows"
+    static let aerospaceIntegrationKey = "aerospaceIntegration"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -12,6 +13,7 @@ enum Settings {
             includeMinimizedKey: true,
             includeOtherSpacesKey: true,
             includeNoWindowsKey: false,
+            aerospaceIntegrationKey: true,
         ])
     }
 
@@ -29,5 +31,9 @@ enum Settings {
 
     static var includeNoWindows: Bool {
         UserDefaults.standard.bool(forKey: includeNoWindowsKey)
+    }
+
+    static var aerospaceIntegration: Bool {
+        UserDefaults.standard.bool(forKey: aerospaceIntegrationKey)
     }
 }

@@ -10,11 +10,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Settings.registerDefaults()
         AX.configureGlobalTimeout()
-        aerospace.start()
+        if Settings.aerospaceIntegration {
+            aerospace.start()
+        }
         mru = MRUTracker()
-        controller = SwitcherController(mru: mru)
+        controller = SwitcherController(mru: mru, aerospace: aerospace)
         controller.onTapInvalidated = { [weak self] in self?.scheduleRecovery() }
         statusItem.setUp()
+        statusItem.onAerospaceToggled = { [weak self] enabled in
+            guard let self else { return }
+            if enabled {
+                self.aerospace.start()
+            } else {
+                self.aerospace.stop()
+            }
+        }
         ensurePermissionAndStart()
         // Optional: unlocks live titles for windows in other Spaces via
         // CGWindowList. Used solely to read titles; Cyclist never captures

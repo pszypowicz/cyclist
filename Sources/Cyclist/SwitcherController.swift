@@ -7,9 +7,10 @@ import AppKit
 final class SwitcherController {
     private let tap = EventTap()
     private let mru: MRUTracker
+    private let aerospace: AeroSpaceClient
     private let panel = SwitcherPanel()
     private let navigator = SpaceNavigator()
-    private lazy var chain = ChainNavigator(navigator: navigator)
+    private lazy var chain = ChainNavigator(navigator: navigator, aerospace: aerospace)
 
     private enum Session {
         // Snapshot still building off the tap callback. `presses` records
@@ -43,8 +44,9 @@ final class SwitcherController {
     private let leftArrowKey: Int64 = 123
     private let rightArrowKey: Int64 = 124
 
-    init(mru: MRUTracker) {
+    init(mru: MRUTracker, aerospace: AeroSpaceClient) {
         self.mru = mru
+        self.aerospace = aerospace
         tap.onKeyDown = { [weak self] event in
             self?.handleKeyDown(event) ?? false
         }
