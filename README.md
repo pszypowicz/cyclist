@@ -12,7 +12,7 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 
 - Replaces the native Cmd+Tab switcher with a vertical, text-only list in most-recently-used app order. Every window gets its own row (`App - Window title`), so two Safari windows are two entries.
 - Windows in other Spaces (including native fullscreen) get their own rows too. With Screen Recording permission granted their titles are live; without it, each row shows the last title Cyclist saw while that window was visible. Selecting a row jumps straight to that Space.
-- A separate binding (Cmd+`) cycles through the windows of the frontmost app, including minimized ones - something the native window cycler skips.
+- A separate binding (Cmd+`) cycles through the windows of the frontmost app in most-recently-used order, including minimized ones and windows in other Spaces (native fullscreen included) - things the native window cycler skips. A quick tap bounces between the app's last two windows.
 - Ctrl+Left/Right walks the native Spaces of the primary display in Mission Control order - user desktops and fullscreen Spaces alike - instantly and without animation. Arriving on a desktop focuses its top window, so leaving a fullscreen app always lands somewhere concrete.
 - With [AeroSpace](https://github.com/nikitabobko/AeroSpace) running, its workspaces join that ring in place of the desktop hosting them, so Ctrl+Left/Right walks `workspace 1 ... workspace N, fullscreen Spaces` seamlessly - workspace steps go over AeroSpace's socket, and crossing from a fullscreen Space lands on the ring-adjacent workspace. Windows parked in hidden workspaces appear in the switcher as `workspace N` rows; selecting one switches there. Detection is automatic and everything falls back to plain native behavior the moment AeroSpace is absent, disabled, or the menu-bar toggle is off.
 - Four independent settings control what shows up in the list:
@@ -69,7 +69,7 @@ On first launch Cyclist prompts for Accessibility permission and activates itsel
 - Cyclist consumes Ctrl+Left/Right for chain navigation; disable the equivalent Mission Control shortcuts if you do not want both meanings, and quit Cyclist to get the native behavior back.
 
 - While a password field has secure input enabled, macOS withholds keystrokes from event taps, so Cmd+Tab temporarily falls through to the native switcher.
-- Same-app window cycling covers windows in the current Space plus minimized ones; the Accessibility API cannot see individual windows parked in other Spaces (app-level switching still reaches those apps).
-- The AeroSpace bridge speaks the server's socket protocol (version 1) and tracks the workspaces of AeroSpace's focused monitor. Cmd+` window cycling shows no workspace labels yet, and with several native desktops the ring only expands the current one.
+- Same-app window rows for other Spaces rely on the window-server list; their titles need Screen Recording permission or a previous sighting of the window (same rule as the app switcher's other-Space rows).
+- The AeroSpace bridge speaks the server's socket protocol (version 1) and tracks the workspaces of AeroSpace's focused monitor. With several native desktops the ring only expands the current one.
 - The list is keyboard-only; the panel ignores mouse clicks.
 - Shortcuts are not yet rebindable.

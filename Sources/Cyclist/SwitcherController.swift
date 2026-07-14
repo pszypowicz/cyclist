@@ -169,7 +169,7 @@ final class SwitcherController {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.finishWindowsSnapshot(
-                    WindowListProvider.snapshot(for: app, recency: self.recency),
+                    WindowListProvider.snapshot(for: app, recency: self.recency, aerospace: self.aerospace),
                     generation: generation)
             }
         }
@@ -218,7 +218,8 @@ final class SwitcherController {
             }
             let item = items[replay(presses, count: items.count,
                                     initial: startIndex(count: items.count, backward: presses[0]))]
-            focus(app: app, element: item.element, windowID: item.windowID, spaceID: item.spaceID)
+            focus(app: app, element: item.element, windowID: item.windowID,
+                  spaceID: item.spaceID, workspace: item.aerospaceWorkspace)
             return
         }
         guard generation == snapshotGeneration,
@@ -234,7 +235,7 @@ final class SwitcherController {
         presentPanel(
             rows: items.map {
                 SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
-                            annotation: $0.isMinimized ? "minimized" : nil)
+                            annotation: annotation(for: $0))
             },
             selected: index
         )
@@ -284,6 +285,12 @@ final class SwitcherController {
         }
     }
 
+    private func annotation(for item: WindowItem) -> String? {
+        if item.spaceID != nil { return "other space" }
+        if let workspace = item.aerospaceWorkspace { return "workspace \(workspace)" }
+        return item.isMinimized ? "minimized" : nil
+    }
+
     // Delay showing the panel slightly so a quick Cmd+Tab tap switches to the
     // previous app without a visual flash.
     private func presentPanel(rows: [SwitcherRow], selected: Int) {
@@ -318,7 +325,8 @@ final class SwitcherController {
             self.session = nil
             dismissPanel()
             let item = items[index]
-            focus(app: app, element: item.element, windowID: item.windowID, spaceID: item.spaceID)
+            focus(app: app, element: item.element, windowID: item.windowID,
+                  spaceID: item.spaceID, workspace: item.aerospaceWorkspace)
         }
     }
 
@@ -342,38 +350,21 @@ final class SwitcherController {
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
             return
         }
-        // A window in a hidden AeroSpace workspace sits on THIS native
-        // Space, parked off-screen; one AeroSpace command switches the
-        // workspace and focuses it. The window is real either way, so if
-        // the client died since the snapshot, the plain focus path still
-        // reaches it (AeroSpace follows externally focused windows when it
-        // comes back).
-        if let workspace = entry.aerospaceWorkspace, let windowID = entry.windowID, aerospace.isActive {
-            navigator.cancel()
-            chain.cancelPending()
-            if app.isHidden {
-                app.unhide()
-            }
-            Log.write("activate: aerospace focus wid=\(windowID) workspace=\(workspace)")
-            recency.noteFocus(windowID: windowID, source: "commit-aerospace")
-            lastCommit = (app, Date())
-            activationGeneration += 1
-            let generation = activationGeneration
-            aerospace.focusWindow(windowID) { [weak self] ok in
-                guard let self, !ok, self.activationGeneration == generation else { return }
-                self.focusWindow(app: app, element: entry.axWindow, windowID: windowID)
-            }
-            return
-        }
-        focus(app: app, element: entry.axWindow, windowID: entry.windowID, spaceID: entry.spaceID)
+        focus(app: app, element: entry.axWindow, windowID: entry.windowID,
+              spaceID: entry.spaceID, workspace: entry.aerospaceWorkspace)
     }
 
-    // Single focus path for every real-window row: unhide the app, jump to
-    // the window's non-visible Space when the provider resolved one (making
-    // the window key on arrival), else focus directly. Reaching a window in
-    // another Space needs a real Space transition - activation alone never
-    // performs one. Falls back to a direct focus when navigation is refused.
-    private func focus(app: NSRunningApplication, element: AXUIElement?, windowID: Int?, spaceID: UInt64?) {
+    // Single focus path for every real-window row: unhide the app, then
+    // jump to the window's non-visible Space when the provider resolved one
+    // (making the window key on arrival), switch its hidden AeroSpace
+    // workspace when it carries one, else focus directly. Reaching a window
+    // in another Space needs a real Space transition - activation alone
+    // never performs one. Falls back to a direct focus when navigation is
+    // refused or the AeroSpace client died since the snapshot (the window
+    // is real either way, and AeroSpace follows externally focused windows
+    // when it comes back).
+    private func focus(app: NSRunningApplication, element: AXUIElement?, windowID: Int?,
+                       spaceID: UInt64?, workspace: String? = nil) {
         // A newer activation supersedes any Space navigation still in
         // flight, including a chain two-hop's pending workspace leg.
         navigator.cancel()
@@ -389,6 +380,18 @@ final class SwitcherController {
         }
         if app.isHidden {
             app.unhide()
+        }
+        // A window in a hidden AeroSpace workspace sits on THIS native
+        // Space, parked off-screen; one AeroSpace command switches the
+        // workspace and focuses it.
+        if let workspace, let windowID, aerospace.isActive {
+            Log.write("focus: aerospace wid=\(windowID) workspace=\(workspace)")
+            let generation = activationGeneration
+            aerospace.focusWindow(windowID) { [weak self] ok in
+                guard let self, !ok, self.activationGeneration == generation else { return }
+                self.focusWindow(app: app, element: element, windowID: windowID)
+            }
+            return
         }
         // A deterministic AltTab-style focus (setFront+click, macOS performs
         // the transition) does NOT work on macOS 26: the app becomes active

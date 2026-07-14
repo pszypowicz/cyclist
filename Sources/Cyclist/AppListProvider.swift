@@ -60,6 +60,10 @@ enum AppListProvider {
         persistCache()
     }
 
+    static func cachedTitle(windowID: Int) -> String? {
+        titleCache[windowID]
+    }
+
     // Harvest titles of all windows on the current Space (plus the frontmost
     // app's). Called on every verified Space arrival, so a window's title is
     // remembered from merely visiting its Space - without this, windows born
