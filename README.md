@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/icon.png" width="128" alt="Cyclist app icon">
+</p>
+
 # Cyclist
 
 A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots - just a list of app icons, names, and window titles you cycle through with Cmd+Tab.
@@ -36,7 +40,17 @@ Shortcuts are hardcoded in this release and use physical key positions (Tab and 
 - **Accessibility** permission (System Settings > Privacy & Security > Accessibility) - required for the global Cmd+Tab hook and for reading window state
 - **Screen Recording** permission, optional but recommended - macOS gates the titles of windows in other Spaces behind it. Cyclist uses it solely to read those titles and never captures window contents; there are no thumbnails or screenshots anywhere in the UI. Without it, other-Space rows show the last title Cyclist saw while the window was visible
 
-## Build and install
+## Install
+
+### Homebrew
+
+```sh
+brew install --cask pszypowicz/tap/cyclist
+```
+
+The cask clears the quarantine flag (release builds are not notarized yet) and launches the app after install.
+
+### Build from source
 
 ```sh
 scripts/build-app.sh
@@ -44,9 +58,9 @@ cp -R build/Cyclist.app /Applications/
 open /Applications/Cyclist.app
 ```
 
-On first launch Cyclist prompts for Accessibility permission and activates itself once granted. It lives in the menu bar (no Dock icon); the menu holds the list settings, a native Launch at Login toggle (registers with System Settings > General > Login Items), and Quit.
-
 The build script signs with your "Apple Development" certificate when one is present so the Accessibility grant survives rebuilds. See `scripts/build-app.sh --help` for options.
+
+On first launch Cyclist prompts for Accessibility permission and activates itself once granted. It lives in the menu bar (no Dock icon); the menu holds the list settings, a native Launch at Login toggle (registers with System Settings > General > Login Items), and Quit.
 
 ## Known limitations
 
