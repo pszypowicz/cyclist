@@ -19,16 +19,9 @@ final class AeroSpaceConnection {
     // AeroSpace release compatible with this code is running".
     static let protocolVersion: UInt32 = 1
 
-    enum OpenError: Error, CustomStringConvertible {
+    enum OpenError: Error {
         case transport(String)
         case versionMismatch(UInt32)
-
-        var description: String {
-            switch self {
-            case .transport(let reason): return reason
-            case .versionMismatch(let version): return "server speaks v\(version)"
-            }
-        }
     }
 
     enum RequestError: Error, CustomStringConvertible {
@@ -59,7 +52,10 @@ final class AeroSpaceConnection {
     }
 
     private var pending: [Request] = []
-    private var inFlight = false
+    // The request whose answer is being awaited. Kept (not just a flag) so
+    // close() can fail its completion: callers rely on completions for
+    // fallback focus paths, and a dropped one leaves them hanging.
+    private var inFlight: Request?
     private var timeoutWork: DispatchWorkItem?
     private var eventMode = false
 
@@ -114,7 +110,7 @@ final class AeroSpaceConnection {
                 finish(.failure(.transport("handshake EOF")))
                 return
             }
-            let serverVersion = data.withUnsafeBytes { $0.load(as: UInt32.self) }
+            let serverVersion = data.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
             guard serverVersion == Self.protocolVersion else {
                 finish(.failure(.versionMismatch(serverVersion)))
                 return
@@ -147,9 +143,9 @@ final class AeroSpaceConnection {
     }
 
     private func pump() {
-        guard !inFlight, !closed, let connection, !pending.isEmpty else { return }
+        guard inFlight == nil, !closed, let connection, !pending.isEmpty else { return }
         let request = pending.removeFirst()
-        inFlight = true
+        inFlight = request
 
         // windowId/workspace must be present as explicit nulls: the server
         // treats absent keys as a malformed client and appends a warning.
@@ -158,7 +154,7 @@ final class AeroSpaceConnection {
             "windowId": NSNull(), "workspace": NSNull(),
         ]
         guard let payload = try? JSONSerialization.data(withJSONObject: body) else {
-            inFlight = false
+            inFlight = nil
             request.completion(.failure(.failed("request encoding failed")))
             return
         }
@@ -178,11 +174,12 @@ final class AeroSpaceConnection {
             guard let data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let exitCode = json["exitCode"] as? Int else {
+                self.inFlight = nil
                 request.completion(.failure(.failed("answer decoding failed")))
                 self.fail("bad answer frame")
                 return
             }
-            self.inFlight = false
+            self.inFlight = nil
             request.completion(.success(AeroSpaceAnswer(
                 exitCode: Int32(exitCode),
                 stdout: json["stdout"] as? String ?? "",
@@ -228,9 +225,10 @@ final class AeroSpaceConnection {
         closed = true
         timeoutWork?.cancel()
         timeoutWork = nil
-        let unsent = pending
+        let unanswered = (inFlight.map { [$0] } ?? []) + pending
+        inFlight = nil
         pending = []
-        for request in unsent {
+        for request in unanswered {
             request.completion(.failure(.failed("connection closed")))
         }
         connection?.stateUpdateHandler = nil
@@ -265,7 +263,9 @@ final class AeroSpaceConnection {
                 completion(nil)
                 return
             }
-            let count = header.withUnsafeBytes { $0.load(as: UInt32.self) }
+            // loadUnaligned: NWConnection may hand back a slice of its
+            // internal buffer at an arbitrary byte offset.
+            let count = header.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
             // A frame beyond a few MB means the stream is out of sync (the
             // largest real payload is a full window list).
             guard count > 0, count < 4_000_000 else {

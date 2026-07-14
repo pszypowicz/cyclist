@@ -125,7 +125,10 @@ enum AppListProvider {
         )
     }
 
-    static func snapshot(mru: MRUTracker, aerospace: AeroSpaceClient? = nil) -> [ListEntry] {
+    // The client is safe to consult in any state: inactive means an empty
+    // cache, so hiddenWorkspace lookups return nil and rows classify
+    // exactly as without the integration.
+    static func snapshot(mru: MRUTracker, aerospace: AeroSpaceClient) -> [ListEntry] {
         var cgWindows: [pid_t: [Int]] = [:]
         var cgTitles: [Int: String] = [:]
         for window in CGWindows.real([.optionAll, .excludeDesktopElements]) {
@@ -177,7 +180,7 @@ enum AppListProvider {
                 // window in a non-visible native Space needs a real Space
                 // transition no matter what AeroSpace thinks of it.
                 let workspace = space == nil
-                    ? window.windowID.flatMap { aerospace?.hiddenWorkspace(forWindow: $0) }
+                    ? window.windowID.flatMap { aerospace.hiddenWorkspace(forWindow: $0) }
                     : nil
                 if space != nil || workspace != nil {
                     hasOtherSpaceWindows = true

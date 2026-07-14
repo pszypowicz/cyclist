@@ -33,6 +33,10 @@ final class SwitcherController {
     // finished one.
     private var pendingCommits: [(generation: Int, session: Session)] = []
     private var showPanelWork: DispatchWorkItem?
+    // Invalidates async focus fallbacks (an AeroSpace focus command can
+    // fail up to its timeout later) once a newer activation happened;
+    // native arrivals are covered by navigator.cancel() instead.
+    private var activationGeneration = 0
 
     // Fired when the key tap dies (e.g. Accessibility revoked at runtime);
     // the owner polls for the grant and calls start() to rebuild.
@@ -327,12 +331,15 @@ final class SwitcherController {
         // comes back).
         if let workspace = entry.aerospaceWorkspace, let windowID = entry.windowID, aerospace.isActive {
             navigator.cancel()
+            chain.cancelPending()
             if app.isHidden {
                 app.unhide()
             }
             Log.write("activate: aerospace focus wid=\(windowID) workspace=\(workspace)")
+            activationGeneration += 1
+            let generation = activationGeneration
             aerospace.focusWindow(windowID) { [weak self] ok in
-                guard let self, !ok else { return }
+                guard let self, !ok, self.activationGeneration == generation else { return }
                 self.focusWindow(app: app, element: entry.axWindow, windowID: windowID)
             }
             return
@@ -346,8 +353,11 @@ final class SwitcherController {
     // another Space needs a real Space transition - activation alone never
     // performs one. Falls back to a direct focus when navigation is refused.
     private func focus(app: NSRunningApplication, element: AXUIElement?, windowID: Int?, spaceID: UInt64?) {
-        // A newer activation supersedes any Space navigation still in flight.
+        // A newer activation supersedes any Space navigation still in
+        // flight, including a chain two-hop's pending workspace leg.
         navigator.cancel()
+        chain.cancelPending()
+        activationGeneration += 1
         if app.isHidden {
             app.unhide()
         }

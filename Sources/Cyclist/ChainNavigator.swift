@@ -29,10 +29,12 @@ final class ChainNavigator {
 
     // A direct workspace switch answers in ~10-30ms; past that the press
     // was lost and the next one should re-read reality. The two-hop grace
-    // covers the paced native leg (retries included) before the switch
-    // can even be issued.
+    // covers the paced native leg before the switch can even be issued:
+    // a dropped swipe costs the 1.15s pacing floor plus three 0.4s
+    // in-flight checks per retry, so the worst verified arrival lands
+    // past 4s.
     private let directSwitchGrace: TimeInterval = 0.3
-    private let hopSwitchGrace: TimeInterval = 3.0
+    private let hopSwitchGrace: TimeInterval = 5.0
 
     // The in-flight workspace destination. AeroSpace steps never go
     // through SpaceNavigator, so the chain keeps its own pending notion
@@ -46,6 +48,14 @@ final class ChainNavigator {
         self.aerospace = aerospace
     }
 
+    // Callers that cancel the underlying SpaceNavigator (a switcher
+    // activation superseding an in-flight two-hop) must drop the pending
+    // workspace with it, or the next press would step relative to a
+    // destination that was never reached.
+    func cancelPending() {
+        pendingWorkspace = nil
+    }
+
     func navigate(left: Bool) {
         guard let display = Spaces.activeDisplayInfo() else {
             Log.write("chain: no display info")
@@ -55,13 +65,15 @@ final class ChainNavigator {
         // reconnect); async and debounced, never affects this press.
         aerospace.kick()
         guard let (ring, base) = resolveRing(display) else {
-            Log.write("chain: current position not in ring")
+            Log.write("chain: position not in ring; current \(display.current)"
+                + " pending \(navigator.pendingTarget.map(String.init) ?? "-")"
+                + " order \(display.order)")
             return
         }
         guard let currentIndex = ring.firstIndex(of: base) else { return }
         let targetIndex = currentIndex + (left ? -1 : 1)
         guard ring.indices.contains(targetIndex) else {
-            Log.write("chain: at \(left ? "left" : "right") edge")
+            Log.write("chain: at \(left ? "left" : "right") edge of \(ring.map(describe))")
             return
         }
         let direction = left ? "left" : "right"
@@ -100,13 +112,17 @@ final class ChainNavigator {
                 guard let self else { return }
                 let target = self.pendingWorkspace?.host == host
                     ? (self.pendingWorkspace?.name ?? name) : name
-                self.aerospace.switchToWorkspace(target) { [weak self] ok in
+                // failIfNoop: when the target is already AeroSpace's focused
+                // workspace the switch would succeed without focusing
+                // anything, leaving key focus behind on the fullscreen app.
+                // The noop then lands in the failure branch, whose fallback
+                // is exactly the native arrival focus.
+                self.aerospace.switchToWorkspace(target, failIfNoop: true) { [weak self] ok in
                     guard let self, self.pendingWorkspace?.name == target else { return }
                     self.pendingWorkspace = nil
                     if !ok {
                         // Keep the fullscreen-exit guarantee of landing on
                         // something concrete even if the client just died.
-                        Log.write("chain: workspace switch to \(target) failed after hop")
                         Self.focusTopUserWindow()
                     }
                 }
@@ -172,7 +188,11 @@ final class ChainNavigator {
                       ring.contains(.workspace(focused, host: inFlight)) else { return nil }
                 return .workspace(focused, host: inFlight)
             }
-            if ring.contains(.native(inFlight)) { return .native(inFlight) }
+            // An in-flight target missing from the order means the display
+            // configuration moved under the navigation; stop rather than
+            // base on stale state and hijack another display's Spaces.
+            guard ring.contains(.native(inFlight)) else { return nil }
+            return .native(inFlight)
         }
         if display.current == host {
             guard let focused = aerospace.focusedWorkspace,

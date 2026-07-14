@@ -44,6 +44,7 @@ final class AeroSpaceClient {
     private var retryWork: DispatchWorkItem?
     private var refreshWork: DispatchWorkItem?
     private var lastKick = Date.distantPast
+    private var lastRefresh = Date.distantPast
     // Invalidates completions of a torn-down connection cycle.
     private var generation = 0
     private var loggedServer = false
@@ -106,42 +107,51 @@ final class AeroSpaceClient {
 
     // MARK: - commands
 
-    func switchToWorkspace(_ name: String, completion: ((Bool) -> Void)? = nil) {
-        guard state == .active, let cmd else {
-            completion?(false)
-            return
+    // failIfNoop makes a switch to the already-focused workspace answer
+    // with a non-zero exit instead of a silent success, so callers that
+    // chain focus work onto the switch can tell "switched" from "nothing
+    // happened, nobody got focused".
+    func switchToWorkspace(_ name: String, failIfNoop: Bool = false, completion: ((Bool) -> Void)? = nil) {
+        var args = ["workspace", name]
+        if failIfNoop {
+            args.append("--fail-if-noop")
         }
-        cmd.send(args: ["workspace", name], coalescingKey: "workspace") { [weak self] result in
-            switch result {
-            case .success(let answer) where answer.exitCode == 0:
-                // The confirming event may lag the answer; keep the cache
-                // ahead so an immediate next press steps from here.
-                self?.focusedWorkspace = name
-                completion?(true)
-            case .success(let answer):
-                self?.noteCommandError("workspace \(name)", answer)
-                completion?(false)
-            case .failure(let reason):
-                Log.debug("aerospace: workspace \(name) dropped (\(reason))")
-                completion?(false)
-            }
-        }
+        runCommand(args, what: "workspace \(name)", coalescingKey: "workspace",
+                   quietFailure: failIfNoop,
+                   onSuccess: { [weak self] in
+                       // The confirming event may lag the answer; keep the
+                       // cache ahead so an immediate next press steps from
+                       // here.
+                       self?.focusedWorkspace = name
+                   },
+                   completion: completion)
     }
 
     func focusWindow(_ windowID: Int, completion: ((Bool) -> Void)? = nil) {
+        runCommand(["focus", "--window-id", String(windowID)], what: "focus \(windowID)",
+                   completion: completion)
+    }
+
+    private func runCommand(_ args: [String],
+                            what: String,
+                            coalescingKey: String? = nil,
+                            quietFailure: Bool = false,
+                            onSuccess: (() -> Void)? = nil,
+                            completion: ((Bool) -> Void)?) {
         guard state == .active, let cmd else {
             completion?(false)
             return
         }
-        cmd.send(args: ["focus", "--window-id", String(windowID)]) { [weak self] result in
+        cmd.send(args: args, coalescingKey: coalescingKey) { [weak self] result in
             switch result {
             case .success(let answer) where answer.exitCode == 0:
+                onSuccess?()
                 completion?(true)
             case .success(let answer):
-                self?.noteCommandError("focus \(windowID)", answer)
+                self?.noteCommandError(what, answer, quiet: quietFailure)
                 completion?(false)
             case .failure(let reason):
-                Log.debug("aerospace: focus \(windowID) dropped (\(reason))")
+                Log.debug("aerospace: \(what) dropped (\(reason))")
                 completion?(false)
             }
         }
@@ -300,7 +310,18 @@ final class AeroSpaceClient {
             } else {
                 becomeDisabled()
             }
-        case "focused-workspace-changed", "focus-changed", "focused-monitor-changed":
+        case "focus-changed":
+            // Fires on every window focus change systemwide; the payload
+            // already carries the one thing focus can change (the focused
+            // workspace), so a full re-query is only a slow-cadence
+            // freshness sweep here, not the primary signal.
+            if state == .active, let workspace = event["workspace"] as? String {
+                focusedWorkspace = workspace
+            }
+            if Date().timeIntervalSince(lastRefresh) > 5 {
+                refresh()
+            }
+        case "focused-workspace-changed", "focused-monitor-changed":
             if state == .active, let workspace = event["workspace"] as? String {
                 focusedWorkspace = workspace
             }
@@ -335,10 +356,14 @@ final class AeroSpaceClient {
     private func performRefresh() {
         guard state == .active, let cmd else { return }
         let generation = self.generation
+        // Two commands cover the whole cache: one workspace query with
+        // format variables (ordering, focused flag, visibility, monitor
+        // assignment in a single answer) and the window list. Commands
+        // serialize on the connection and each holds AeroSpace's main
+        // thread ~10ms, so fewer round trips matter.
         let queries: [[String]] = [
-            ["list-workspaces", "--monitor", "focused", "--json", "--format", "%{workspace}"],
-            ["list-workspaces", "--focused", "--json", "--format", "%{workspace}"],
-            ["list-workspaces", "--monitor", "all", "--visible", "--json", "--format", "%{workspace}"],
+            ["list-workspaces", "--monitor", "all", "--json", "--format",
+             "%{workspace} %{monitor-id} %{workspace-is-focused} %{workspace-is-visible}"],
             ["list-windows", "--monitor", "all", "--json", "--format", "%{window-id} %{workspace}"],
         ]
         var rows: [Int: [[String: Any]]] = [:]
@@ -371,16 +396,21 @@ final class AeroSpaceClient {
 
     private func applyRefresh(_ rows: [Int: [[String: Any]]]) {
         guard state == .active else { return }
-        guard rows.count == 4 else {
-            Log.debug("aerospace: refresh incomplete (\(rows.count)/4)")
+        guard let workspaceRows = rows[0], let windowRows = rows[1] else {
+            Log.debug("aerospace: refresh incomplete")
             return
         }
-        let names = { (rows: [[String: Any]]) in rows.compactMap { $0["workspace"] as? String } }
-        let ordered = names(rows[0]!)
-        let focused = names(rows[1]!).first
-        let visible = Set(names(rows[2]!))
+        let focusedRow = workspaceRows.first { $0["workspace-is-focused"] as? Bool == true }
+        let focused = focusedRow?["workspace"] as? String
+        let focusedMonitor = focusedRow?["monitor-id"] as? Int
+        let ordered = workspaceRows
+            .filter { $0["monitor-id"] as? Int == focusedMonitor }
+            .compactMap { $0["workspace"] as? String }
+        let visible = Set(workspaceRows
+            .filter { $0["workspace-is-visible"] as? Bool == true }
+            .compactMap { $0["workspace"] as? String })
         var byWindow: [Int: String] = [:]
-        for row in rows[3]! {
+        for row in windowRows {
             guard let id = row["window-id"] as? Int,
                   let workspace = row["workspace"] as? String else { continue }
             byWindow[id] = workspace
@@ -393,6 +423,7 @@ final class AeroSpaceClient {
         focusedWorkspace = focused
         visibleWorkspaces = visible
         windowWorkspace = byWindow
+        lastRefresh = Date()
         let summary = "aerospace: cache workspaces=\(merged) focused=\(focused ?? "-")"
             + " visible=\(visible.sorted()) windows=\(byWindow.count)"
         if changed {
@@ -402,9 +433,11 @@ final class AeroSpaceClient {
         }
     }
 
-    private func noteCommandError(_ what: String, _ answer: AeroSpaceAnswer) {
+    private func noteCommandError(_ what: String, _ answer: AeroSpaceAnswer, quiet: Bool = false) {
         if answer.exitCode == 2, answer.stderr.contains("server is disabled") {
             becomeDisabled()
+        } else if quiet {
+            Log.debug("aerospace: \(what) failed (exit \(answer.exitCode)): \(answer.stderr)")
         } else {
             Log.write("aerospace: \(what) failed (exit \(answer.exitCode)): \(answer.stderr)")
         }
