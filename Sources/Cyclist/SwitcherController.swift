@@ -167,10 +167,7 @@ final class SwitcherController {
             snapshotGeneration += 1
             let generation = snapshotGeneration
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.finishWindowsSnapshot(
-                    WindowListProvider.snapshot(for: app, recency: self.recency, aerospace: self.aerospace),
-                    generation: generation)
+                self?.buildWindowsSnapshot(for: app, generation: generation, attempt: 0)
             }
         }
     }
@@ -206,6 +203,25 @@ final class SwitcherController {
             },
             selected: index
         )
+    }
+
+    // Mid Space-transition an app can blow the 0.05s AX messaging timeout
+    // and list no current-Space windows at all; a session resolved against
+    // such a CG-only list commits an other-Space row and mis-navigates
+    // (observed as back-to-back jumps to the same Space when Cmd+` is
+    // pressed rapidly across Spaces). The frontmost app always has at
+    // least one current-Space window, so an AX-empty list is implausible:
+    // retry once shortly; the session stays pending and presses accumulate.
+    private func buildWindowsSnapshot(for app: NSRunningApplication, generation: Int, attempt: Int) {
+        let items = WindowListProvider.snapshot(for: app, recency: recency, aerospace: aerospace)
+        if attempt == 0, !items.contains(where: { $0.element != nil }) {
+            Log.write("windows snapshot: no AX rows for pid=\(app.processIdentifier); retrying")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.buildWindowsSnapshot(for: app, generation: generation, attempt: 1)
+            }
+            return
+        }
+        finishWindowsSnapshot(items, generation: generation)
     }
 
     private func finishWindowsSnapshot(_ items: [WindowItem], generation: Int) {

@@ -38,6 +38,13 @@ final class WindowFocusTracker {
     private var retryGeneration = 0
 
     init() {
+        // Seed from the current-Space z-order (front-to-back) so ordering
+        // is sane immediately after launch instead of degrading to AX
+        // enumeration order until focus events accumulate.
+        for window in CGWindows.real([.optionOnScreenOnly]).reversed() {
+            counter += 1
+            sequence[window.id] = counter
+        }
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(didActivate(_:)),
                            name: NSWorkspace.didActivateApplicationNotification, object: nil)
