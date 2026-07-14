@@ -7,6 +7,7 @@ import AppKit
 final class SwitcherController {
     private let tap = EventTap()
     private let mru: MRUTracker
+    private let recency: WindowFocusTracker
     private let aerospace: AeroSpaceClient
     private let panel = SwitcherPanel()
     private let navigator = SpaceNavigator()
@@ -48,8 +49,9 @@ final class SwitcherController {
     private let leftArrowKey: Int64 = 123
     private let rightArrowKey: Int64 = 124
 
-    init(mru: MRUTracker, aerospace: AeroSpaceClient) {
+    init(mru: MRUTracker, recency: WindowFocusTracker, aerospace: AeroSpaceClient) {
         self.mru = mru
+        self.recency = recency
         self.aerospace = aerospace
         tap.onKeyDown = { [weak self] event in
             self?.handleKeyDown(event) ?? false
@@ -336,6 +338,7 @@ final class SwitcherController {
                 app.unhide()
             }
             Log.write("activate: aerospace focus wid=\(windowID) workspace=\(workspace)")
+            recency.noteFocus(windowID: windowID, source: "commit-aerospace")
             activationGeneration += 1
             let generation = activationGeneration
             aerospace.focusWindow(windowID) { [weak self] ok in
@@ -358,6 +361,13 @@ final class SwitcherController {
         navigator.cancel()
         chain.cancelPending()
         activationGeneration += 1
+        // Record at commit intent, not on arrival focus: didActivate
+        // propagates ~0.1-1s after a switch, but a quick tap lets the user
+        // reopen the switcher within ~200ms and that snapshot must already
+        // rank this window first.
+        if let windowID {
+            recency.noteFocus(windowID: windowID, source: "commit")
+        }
         if app.isHidden {
             app.unhide()
         }

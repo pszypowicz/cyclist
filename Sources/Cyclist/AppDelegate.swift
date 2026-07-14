@@ -4,6 +4,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = StatusItemController()
     private let aerospace = AeroSpaceClient()
     private var mru: MRUTracker!
+    private var recency: WindowFocusTracker!
     private var controller: SwitcherController!
     private var permissionTimer: Timer?
 
@@ -14,7 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             aerospace.start()
         }
         mru = MRUTracker()
-        controller = SwitcherController(mru: mru, aerospace: aerospace)
+        recency = WindowFocusTracker()
+        controller = SwitcherController(mru: mru, recency: recency, aerospace: aerospace)
         controller.onTapInvalidated = { [weak self] in self?.scheduleRecovery() }
         statusItem.setUp()
         statusItem.onAerospaceToggled = { [weak self] enabled in
@@ -55,6 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             timer.invalidate()
             self.permissionTimer = nil
             Log.write("event tap running")
+            // On first launch the tracker attached before the Accessibility
+            // grant existed; re-seed now that AX answers.
+            self.recency.attachToFrontmost()
         }
     }
 }
