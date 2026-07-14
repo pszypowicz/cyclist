@@ -139,7 +139,7 @@ final class SwitcherController {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.finishAppsSnapshot(
-                    AppListProvider.snapshot(mru: self.mru, aerospace: self.aerospace),
+                    AppListProvider.snapshot(mru: self.mru, recency: self.recency, aerospace: self.aerospace),
                     generation: generation)
             }
         }
@@ -161,7 +161,10 @@ final class SwitcherController {
             snapshotGeneration += 1
             let generation = snapshotGeneration
             DispatchQueue.main.async { [weak self] in
-                self?.finishWindowsSnapshot(WindowListProvider.snapshot(for: app), generation: generation)
+                guard let self else { return }
+                self.finishWindowsSnapshot(
+                    WindowListProvider.snapshot(for: app, recency: self.recency),
+                    generation: generation)
             }
         }
     }

@@ -128,7 +128,7 @@ enum AppListProvider {
     // The client is safe to consult in any state: inactive means an empty
     // cache, so hiddenWorkspace lookups return nil and rows classify
     // exactly as without the integration.
-    static func snapshot(mru: MRUTracker, aerospace: AeroSpaceClient) -> [ListEntry] {
+    static func snapshot(mru: MRUTracker, recency: WindowFocusTracker, aerospace: AeroSpaceClient) -> [ListEntry] {
         var cgWindows: [pid_t: [Int]] = [:]
         var cgTitles: [Int: String] = [:]
         for window in CGWindows.real([.optionAll, .excludeDesktopElements]) {
@@ -262,7 +262,17 @@ enum AppListProvider {
                     aerospaceWorkspace: nil
                 ))
             }
-            entries.append(contentsOf: appEntries)
+            // Most recently focused window first within the app. Swift's
+            // sort is not stable, so the original index is the tiebreak:
+            // untracked windows (rank 0, including the handle-less fallback
+            // rows) keep their AX-then-CG order instead of shuffling
+            // between snapshots.
+            let ranked = appEntries.enumerated().sorted { a, b in
+                let rankA = recency.rank(of: a.element.windowID)
+                let rankB = recency.rank(of: b.element.windowID)
+                return rankA != rankB ? rankA > rankB : a.offset < b.offset
+            }
+            entries.append(contentsOf: ranked.map(\.element))
         }
         flushTitleCache()
         return entries

@@ -13,7 +13,7 @@ struct WindowItem {
 // exposes windows in the current Space plus minimized ones; windows parked in
 // other Spaces are invisible here.
 enum WindowListProvider {
-    static func snapshot(for app: NSRunningApplication) -> [WindowItem] {
+    static func snapshot(for app: NSRunningApplication, recency: WindowFocusTracker) -> [WindowItem] {
         // AX can stale-list windows of a Space just left; carrying their real
         // Space lets the commit path navigate instead of fronting an app
         // whose window never appears.
@@ -36,6 +36,14 @@ enum WindowListProvider {
             ))
         }
         AppListProvider.flushTitleCache()
-        return items
+        // Most recently focused first: index 0 becomes the current window,
+        // so the session's start index (1) is the most recent OTHER window
+        // and a quick Cmd+` bounces between the last two. Index tiebreak
+        // keeps AX order for untracked windows (Swift's sort is unstable).
+        return items.enumerated().sorted { a, b in
+            let rankA = recency.rank(of: a.element.windowID)
+            let rankB = recency.rank(of: b.element.windowID)
+            return rankA != rankB ? rankA > rankB : a.offset < b.offset
+        }.map(\.element)
     }
 }
