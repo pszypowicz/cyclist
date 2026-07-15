@@ -83,4 +83,13 @@ enum AX {
     static func raise(_ element: AXUIElement) {
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)
     }
+
+    // Presses the window's close button; closing has no window-level AX
+    // action of its own.
+    static func close(_ element: AXUIElement) {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXCloseButtonAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return }
+        AXUIElementPerformAction(value as! AXUIElement, kAXPressAction as CFString)
+    }
 }

@@ -29,6 +29,9 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 | Cmd+Tab (hold Cmd)  | Open the list; each Tab advances              |
 | Cmd+Shift+Tab       | Cycle backward                                |
 | Cmd+`               | Cycle windows of the frontmost app            |
+| Up/Down, K/J (open) | Move the selection                            |
+| Q (while open)      | Quit the selected app                         |
+| W (while open)      | Close the selected window                     |
 | Esc (while open)    | Cancel                                        |
 | Release Cmd         | Switch to the selected item                   |
 | Ctrl+Left / Right   | Previous / next workspace or fullscreen Space |

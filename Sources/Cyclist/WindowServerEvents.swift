@@ -76,6 +76,7 @@ final class WindowServerEvents {
     // transition and can fire mid-animation; consumers must treat them as
     // wake-up hints and re-read real state, never as arrival truth.
     var onFocused: ((Int) -> Void)?
+    var onCreated: ((Int) -> Void)?
     var onDestroyed: ((Int) -> Void)?
     var onSpaceChanged: ((UInt64) -> Void)?
 
@@ -108,6 +109,7 @@ final class WindowServerEvents {
             if optedIn.insert(windowID).inserted {
                 schedulePushOptIns()
             }
+            onCreated?(Int(windowID))
         case Self.windowDestroyed:
             if optedIn.remove(windowID) != nil {
                 schedulePushOptIns()
