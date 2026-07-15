@@ -30,6 +30,11 @@ final class WindowFocusTracker {
     private(set) var latestWindowID: Int?
 
     private var storm: (pid: pid_t, windowIDs: Set<Int>, sawFocus: Bool, until: Date)?
+    // A focus event rejected because its app was not frontmost. Usually a
+    // reveal-raise to discard, but when the app activation notification
+    // follows (it lags the event stream), the rejection was the real focus
+    // of a cross-app switch and gets backfilled.
+    private var lastRejected: (windowID: Int, pid: pid_t, at: Date)?
 
     // The stream is shared (SpaceNavigator consumes its Space events) and
     // started by the owner once every consumer has wired its callbacks.
@@ -75,7 +80,21 @@ final class WindowFocusTracker {
 
     @objc private func didActivate(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-        installStorm(pid: app.processIdentifier)
+        let pid = app.processIdentifier
+        installStorm(pid: pid)
+        // A focus event for this app that arrived before the activation
+        // notification was rejected by the frontmost guard; it was the
+        // real focus of this very activation.
+        if let rejected = lastRejected, rejected.pid == pid,
+           Date().timeIntervalSince(rejected.at) < 1 {
+            if var storm, storm.pid == pid {
+                storm.windowIDs.remove(rejected.windowID)
+                storm.sawFocus = true
+                self.storm = storm
+            }
+            noteFocus(windowID: rejected.windowID, source: "activation")
+            lastRejected = nil
+        }
     }
 
     private func installStorm(pid: pid_t) {
@@ -103,6 +122,21 @@ final class WindowFocusTracker {
             }
             storm.sawFocus = true
             self.storm = storm
+            noteFocus(windowID: windowID, source: "ws-focus")
+            return
+        }
+        // Outside an activation storm, an event is only a user focus when
+        // its app is frontmost: Space and workspace reveals raise the
+        // freshly-visible windows of background apps, and recording those
+        // corrupts both the ranks and the quick tap's notion of the
+        // current window (observed as a first Cmd+Tab that re-commits the
+        // window already held). A genuine cross-app focus rejected here is
+        // backfilled when its activation notification lands.
+        if let pid = CGWindows.owner(of: windowID),
+           pid != NSWorkspace.shared.frontmostApplication?.processIdentifier {
+            lastRejected = (windowID, pid, Date())
+            Log.debug("recency: wid=\(windowID) raise rejected (pid \(pid) not frontmost)")
+            return
         }
         noteFocus(windowID: windowID, source: "ws-focus")
     }
