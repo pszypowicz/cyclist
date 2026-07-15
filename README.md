@@ -41,15 +41,13 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 | Release Cmd         | Switch to the selected item                   |
 | Ctrl+Left / Right   | Previous / next workspace or fullscreen Space |
 
-Quit and Close edit the open list in place: the affected rows leave, the selection moves to a neighbor, and the session ends only when nothing is left. Finder is exempt from Quit unless you opt in with `defaults write com.apple.finder QuitMenuItem -bool true` (the switch the Dock honors); otherwise Q on Finder just beeps.
-
-Shortcuts are hardcoded in this release and use physical key positions (Tab and the key left of 1), so they may land oddly on some non-US layouts.
+Quit and Close keep the list open: the affected rows leave and the selection moves to a neighbor.
 
 ## Requirements
 
 - macOS 13 or later
 - **Accessibility** permission (System Settings > Privacy & Security > Accessibility) - required for the global Cmd+Tab hook and for reading window state
-- **Screen Recording** permission, optional but recommended - macOS gates the titles of windows in other Spaces behind it. Cyclist uses it solely to read those titles and never captures window contents; there are no thumbnails or screenshots anywhere in the UI. Without it, other-Space rows show the last title Cyclist saw while the window was visible
+- **Screen Recording** permission, optional but recommended - macOS gates the titles of windows in other Spaces behind it. Cyclist uses it only to read those titles; without it, other-Space rows show the last title Cyclist saw
 
 ## Install
 
@@ -75,9 +73,7 @@ On first launch Cyclist prompts for Accessibility permission and activates itsel
 
 ## Known limitations
 
-- Switching to a window in another Space (including native fullscreen) jumps there near-instantly by posting synthetic high-velocity trackpad swipe gestures, the technique shared by Space Rabbit, InstantSpaceSwitcher, and Spaceman - macOS performs no Space transition for plain app activation, and the animated route takes over a second per Space. The jump is verified and retried a few times; if a future macOS breaks the gesture encoding entirely, cross-Space switching stops working until the encoding is updated.
 - Cyclist consumes Ctrl+Left/Right for chain navigation; disable the equivalent Mission Control shortcuts if you do not want both meanings, and quit Cyclist to get the native behavior back.
-
 - While a password field has secure input enabled, macOS withholds keystrokes from event taps, so Cmd+Tab temporarily falls through to the native switcher.
 - Same-app window rows for other Spaces rely on the window-server list; their titles need Screen Recording permission or a previous sighting of the window (same rule as the app switcher's other-Space rows).
 - The AeroSpace bridge speaks the server's socket protocol (version 1) and tracks the workspaces of AeroSpace's focused monitor. With several native desktops the ring only expands the current one.
