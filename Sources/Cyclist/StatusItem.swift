@@ -4,6 +4,10 @@ import ServiceManagement
 final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
 
+    // Flipping the AeroSpace toggle must start or stop the socket client,
+    // not just rewrite the default, so it routes through the owner.
+    var onAerospaceToggled: ((Bool) -> Void)?
+
     func setUp() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(
@@ -17,6 +21,10 @@ final class StatusItemController: NSObject {
         menu.addItem(makeToggle(title: "Include minimized apps", key: Settings.includeMinimizedKey))
         menu.addItem(makeToggle(title: "Include apps in other Spaces", key: Settings.includeOtherSpacesKey))
         menu.addItem(makeToggle(title: "Include apps with no windows", key: Settings.includeNoWindowsKey))
+        let aerospaceItem = NSMenuItem(title: "AeroSpace integration", action: #selector(toggleAerospace(_:)), keyEquivalent: "")
+        aerospaceItem.target = self
+        aerospaceItem.state = Settings.aerospaceIntegration ? .on : .off
+        menu.addItem(aerospaceItem)
         menu.addItem(.separator())
 
         let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
@@ -51,6 +59,13 @@ final class StatusItemController: NSObject {
         let newValue = !UserDefaults.standard.bool(forKey: key)
         UserDefaults.standard.set(newValue, forKey: key)
         sender.state = newValue ? .on : .off
+    }
+
+    @objc private func toggleAerospace(_ sender: NSMenuItem) {
+        let newValue = !Settings.aerospaceIntegration
+        UserDefaults.standard.set(newValue, forKey: Settings.aerospaceIntegrationKey)
+        sender.state = newValue ? .on : .off
+        onAerospaceToggled?(newValue)
     }
 
     // Native login item via SMAppService: the app appears in System

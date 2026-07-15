@@ -9,8 +9,14 @@ if arguments.contains("-h") || arguments.contains("--help") {
 
     Flags:
       -h, --help               Show this help.
+      --measure-swipe-floor    Measure the compositor wedge floor by
+                               flipping Spaces in pixel-judged bursts
+                               (takes over the display for ~1 minute).
     """)
     exit(0)
+}
+if arguments.contains("--measure-swipe-floor") {
+    SwipeFloorExperiment.run()
 }
 
 let app = NSApplication.shared

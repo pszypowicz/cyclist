@@ -5,8 +5,9 @@ enum EntryState {
     case normal
     case minimized
     case hidden
-    case otherSpace  // a real window on a Space that is not currently visible
-    case noWindows   // running app with no real windows anywhere
+    case otherSpace       // a real window on a Space that is not currently visible
+    case hiddenWorkspace  // parked off-screen by AeroSpace in a non-visible workspace
+    case noWindows        // running app with no real windows anywhere
 }
 
 // One row of the switcher: a single window of an app, one other-Space
@@ -19,6 +20,7 @@ struct ListEntry {
     let axWindow: AXUIElement?  // set whenever AX exposes the window, any state
     let spaceID: UInt64?        // set for otherSpace rows with a known Space
     let windowID: Int?          // set for every real-window row AX can resolve
+    let aerospaceWorkspace: String?  // set for hiddenWorkspace rows
 }
 
 // Builds the switcher list: every window of every regular app, in app MRU
@@ -56,6 +58,10 @@ enum AppListProvider {
         guard cacheDirty else { return }
         cacheDirty = false
         persistCache()
+    }
+
+    static func cachedTitle(windowID: Int) -> String? {
+        titleCache[windowID]
     }
 
     // Harvest titles of all windows on the current Space (plus the frontmost
@@ -123,7 +129,10 @@ enum AppListProvider {
         )
     }
 
-    static func snapshot(mru: MRUTracker) -> [ListEntry] {
+    // The client is safe to consult in any state: inactive means an empty
+    // cache, so hiddenWorkspace lookups return nil and rows classify
+    // exactly as without the integration.
+    static func snapshot(mru: MRUTracker, recency: WindowFocusTracker, aerospace: AeroSpaceClient) -> [ListEntry] {
         var cgWindows: [pid_t: [Int]] = [:]
         var cgTitles: [Int: String] = [:]
         for window in CGWindows.real([.optionAll, .excludeDesktopElements]) {
@@ -169,11 +178,20 @@ enum AppListProvider {
                     cacheTitle(title, windowID: windowID)
                 }
                 let space = window.windowID.flatMap { spaceByWindow[$0] }
-                if space != nil {
+                // AeroSpace parks hidden-workspace windows off-screen on the
+                // current native Space, so AX lists them like ordinary
+                // windows. Native Space membership wins when both apply: a
+                // window in a non-visible native Space needs a real Space
+                // transition no matter what AeroSpace thinks of it.
+                let workspace = space == nil
+                    ? window.windowID.flatMap { aerospace.hiddenWorkspace(forWindow: $0) }
+                    : nil
+                if space != nil || workspace != nil {
                     hasOtherSpaceWindows = true
                     if !Settings.includeOtherSpaces { continue }
                 }
                 let state: EntryState = space != nil ? .otherSpace
+                    : workspace != nil ? .hiddenWorkspace
                     : hidden ? .hidden : (window.isMinimized ? .minimized : .normal)
                 appEntries.append(ListEntry(
                     app: app,
@@ -183,7 +201,8 @@ enum AppListProvider {
                     state: state,
                     axWindow: window.element,
                     spaceID: space,
-                    windowID: window.windowID
+                    windowID: window.windowID,
+                    aerospaceWorkspace: workspace
                 ))
             }
 
@@ -211,7 +230,8 @@ enum AppListProvider {
                         state: .otherSpace,
                         axWindow: nil,
                         spaceID: space,
-                        windowID: windowID
+                        windowID: windowID,
+                        aerospaceWorkspace: nil
                     ))
                 }
             }
@@ -224,7 +244,8 @@ enum AppListProvider {
                     state: .noWindows,
                     axWindow: nil,
                     spaceID: nil,
-                    windowID: nil
+                    windowID: nil,
+                    aerospaceWorkspace: nil
                 ))
             }
 
@@ -241,10 +262,21 @@ enum AppListProvider {
                     state: .otherSpace,
                     axWindow: nil,
                     spaceID: nil,
-                    windowID: nil
+                    windowID: nil,
+                    aerospaceWorkspace: nil
                 ))
             }
-            entries.append(contentsOf: appEntries)
+            // Most recently focused window first within the app. Swift's
+            // sort is not stable, so the original index is the tiebreak:
+            // untracked windows (rank 0, including the handle-less fallback
+            // rows) keep their AX-then-CG order instead of shuffling
+            // between snapshots.
+            let ranked = appEntries.enumerated().sorted { a, b in
+                let rankA = recency.rank(of: a.element.windowID)
+                let rankB = recency.rank(of: b.element.windowID)
+                return rankA != rankB ? rankA > rankB : a.offset < b.offset
+            }
+            entries.append(contentsOf: ranked.map(\.element))
         }
         flushTitleCache()
         return entries

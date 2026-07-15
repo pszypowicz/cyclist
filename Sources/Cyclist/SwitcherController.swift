@@ -7,9 +7,11 @@ import AppKit
 final class SwitcherController {
     private let tap = EventTap()
     private let mru: MRUTracker
+    private let recency: WindowFocusTracker
+    private let aerospace: AeroSpaceClient
     private let panel = SwitcherPanel()
-    private let navigator = SpaceNavigator()
-    private lazy var chain = ChainNavigator(navigator: navigator)
+    private let navigator: SpaceNavigator
+    private lazy var chain = ChainNavigator(navigator: navigator, aerospace: aerospace)
 
     private enum Session {
         // Snapshot still building off the tap callback. `presses` records
@@ -32,6 +34,16 @@ final class SwitcherController {
     // finished one.
     private var pendingCommits: [(generation: Int, session: Session)] = []
     private var showPanelWork: DispatchWorkItem?
+    // Invalidates async focus fallbacks (an AeroSpace focus command can
+    // fail up to its timeout later) once a newer activation happened;
+    // native arrivals are covered by navigator.cancel() instead.
+    private var activationGeneration = 0
+    // NSWorkspace's frontmost app lags a makeKey/AeroSpace activation by
+    // ~0.1-1s. A press inside that window would classify rows against the
+    // app just left: a quick Cmd+Tab re-commits the very window the user
+    // is on, and Cmd+` lists the wrong app's windows. Right after our own
+    // commit, we are the fresher source of truth.
+    private var lastCommit: (app: NSRunningApplication, at: Date)?
 
     // Fired when the key tap dies (e.g. Accessibility revoked at runtime);
     // the owner polls for the grant and calls start() to rebuild.
@@ -43,8 +55,11 @@ final class SwitcherController {
     private let leftArrowKey: Int64 = 123
     private let rightArrowKey: Int64 = 124
 
-    init(mru: MRUTracker) {
+    init(mru: MRUTracker, recency: WindowFocusTracker, aerospace: AeroSpaceClient, events: WindowServerEvents) {
         self.mru = mru
+        self.recency = recency
+        self.aerospace = aerospace
+        self.navigator = SpaceNavigator(events: events)
         tap.onKeyDown = { [weak self] event in
             self?.handleKeyDown(event) ?? false
         }
@@ -124,9 +139,15 @@ final class SwitcherController {
             session = .pendingApps(presses: [backward])
             snapshotGeneration += 1
             let generation = snapshotGeneration
+            // Freshen the workspace cache for commit time and the next
+            // session; the snapshot below reads whatever is cached now.
+            aerospace.refresh()
+            aerospace.kick()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.finishAppsSnapshot(AppListProvider.snapshot(mru: self.mru), generation: generation)
+                self.finishAppsSnapshot(
+                    AppListProvider.snapshot(mru: self.mru, recency: self.recency, aerospace: self.aerospace),
+                    generation: generation)
             }
         }
     }
@@ -142,12 +163,12 @@ final class SwitcherController {
         case .apps, .pendingApps:
             break
         case nil:
-            guard let app = NSWorkspace.shared.frontmostApplication else { return }
+            guard let app = frontmostForSessions() else { return }
             session = .pendingWindows(app, presses: [backward])
             snapshotGeneration += 1
             let generation = snapshotGeneration
             DispatchQueue.main.async { [weak self] in
-                self?.finishWindowsSnapshot(WindowListProvider.snapshot(for: app), generation: generation)
+                self?.buildWindowsSnapshot(for: app, generation: generation, attempt: 0)
             }
         }
     }
@@ -185,6 +206,25 @@ final class SwitcherController {
         )
     }
 
+    // Mid Space-transition an app can blow the 0.05s AX messaging timeout
+    // and list no current-Space windows at all; a session resolved against
+    // such a CG-only list commits an other-Space row and mis-navigates
+    // (observed as back-to-back jumps to the same Space when Cmd+` is
+    // pressed rapidly across Spaces). The frontmost app always has at
+    // least one current-Space window, so an AX-empty list is implausible:
+    // retry once shortly; the session stays pending and presses accumulate.
+    private func buildWindowsSnapshot(for app: NSRunningApplication, generation: Int, attempt: Int) {
+        let items = WindowListProvider.snapshot(for: app, recency: recency, aerospace: aerospace)
+        if attempt == 0, !items.contains(where: { $0.element != nil }) {
+            Log.write("windows snapshot: no AX rows for pid=\(app.processIdentifier); retrying")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.buildWindowsSnapshot(for: app, generation: generation, attempt: 1)
+            }
+            return
+        }
+        finishWindowsSnapshot(items, generation: generation)
+    }
+
     private func finishWindowsSnapshot(_ items: [WindowItem], generation: Int) {
         if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
             let pending = pendingCommits.remove(at: pendingIndex)
@@ -195,7 +235,8 @@ final class SwitcherController {
             }
             let item = items[replay(presses, count: items.count,
                                     initial: startIndex(count: items.count, backward: presses[0]))]
-            focus(app: app, element: item.element, windowID: item.windowID, spaceID: item.spaceID)
+            focus(app: app, element: item.element, windowID: item.windowID,
+                  spaceID: item.spaceID, workspace: item.aerospaceWorkspace)
             return
         }
         guard generation == snapshotGeneration,
@@ -211,7 +252,7 @@ final class SwitcherController {
         presentPanel(
             rows: items.map {
                 SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
-                            annotation: $0.isMinimized ? "minimized" : nil)
+                            annotation: annotation(for: $0))
             },
             selected: index
         )
@@ -224,13 +265,42 @@ final class SwitcherController {
         }
     }
 
-    // A quick tap should land on the previous app, not on another window of
-    // the frontmost app, whose windows head the MRU list.
+    private func frontmostForSessions() -> NSRunningApplication? {
+        if let lastCommit, Date().timeIntervalSince(lastCommit.at) < 1.5 {
+            return lastCommit.app
+        }
+        return NSWorkspace.shared.frontmostApplication
+    }
+
+    // A quick tap goes to the previously used WINDOW, wherever it lives:
+    // after deliberately visiting two windows of one app, the sibling
+    // window is the suggestion, not another app - and after coming from
+    // another app, that app's window outranks the stale sibling. One rule
+    // covers both: the best-ranked window that is not the one holding
+    // focus. The held window comes from the WindowServer's z-order (the
+    // topmost on-screen real window), not from the focus-event stream:
+    // event-derived "current" goes stale in the gap between a focus
+    // change and its notifications, and a stale exclusion makes the tap
+    // re-commit the very window the user is on (observed after entering
+    // a fullscreen Space). Rows without ranks fall back to the
+    // previous-app heuristic.
     private func initialAppsIndex(items: [ListEntry], backward: Bool) -> Int {
-        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        if backward { return items.count - 1 }
+        let current = CGWindows.real([.optionOnScreenOnly]).first?.id
+        var best: (index: Int, rank: UInt64)?
+        for (index, item) in items.enumerated() {
+            guard let windowID = item.windowID, windowID != current else { continue }
+            let rank = recency.rank(of: windowID)
+            if rank > 0, rank > (best?.rank ?? 0) {
+                best = (index, rank)
+            }
+        }
+        if let best {
+            return best.index
+        }
+        let front = frontmostForSessions()?.processIdentifier
         let firstOtherApp = items.firstIndex { $0.app.processIdentifier != front }
-        let forwardStart = firstOtherApp ?? (items.count > 1 ? 1 : 0)
-        return backward ? items.count - 1 : forwardStart
+        return firstOtherApp ?? (items.count > 1 ? 1 : 0)
     }
 
     private func startIndex(count: Int, backward: Bool) -> Int {
@@ -249,8 +319,15 @@ final class SwitcherController {
         case .hidden: return "hidden"
         case .minimized: return "minimized"
         case .otherSpace: return "other space"
+        case .hiddenWorkspace: return "workspace \(entry.aerospaceWorkspace ?? "?")"
         case .noWindows: return "no windows"
         }
+    }
+
+    private func annotation(for item: WindowItem) -> String? {
+        if item.spaceID != nil { return "other space" }
+        if let workspace = item.aerospaceWorkspace { return "workspace \(workspace)" }
+        return item.isMinimized ? "minimized" : nil
     }
 
     // Delay showing the panel slightly so a quick Cmd+Tab tap switches to the
@@ -287,7 +364,8 @@ final class SwitcherController {
             self.session = nil
             dismissPanel()
             let item = items[index]
-            focus(app: app, element: item.element, windowID: item.windowID, spaceID: item.spaceID)
+            focus(app: app, element: item.element, windowID: item.windowID,
+                  spaceID: item.spaceID, workspace: item.aerospaceWorkspace)
         }
     }
 
@@ -305,24 +383,57 @@ final class SwitcherController {
         if entry.state == .noWindows || (entry.axWindow == nil && entry.windowID == nil),
            let url = app.bundleURL {
             navigator.cancel()
+            lastCommit = (app, Date())
+            recency.expectActivation(of: app)
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
             return
         }
-        focus(app: app, element: entry.axWindow, windowID: entry.windowID, spaceID: entry.spaceID)
+        focus(app: app, element: entry.axWindow, windowID: entry.windowID,
+              spaceID: entry.spaceID, workspace: entry.aerospaceWorkspace)
     }
 
-    // Single focus path for every real-window row: unhide the app, jump to
-    // the window's non-visible Space when the provider resolved one (making
-    // the window key on arrival), else focus directly. Reaching a window in
-    // another Space needs a real Space transition - activation alone never
-    // performs one. Falls back to a direct focus when navigation is refused.
-    private func focus(app: NSRunningApplication, element: AXUIElement?, windowID: Int?, spaceID: UInt64?) {
-        // A newer activation supersedes any Space navigation still in flight.
+    // Single focus path for every real-window row: unhide the app, then
+    // jump to the window's non-visible Space when the provider resolved one
+    // (making the window key on arrival), switch its hidden AeroSpace
+    // workspace when it carries one, else focus directly. Reaching a window
+    // in another Space needs a real Space transition - activation alone
+    // never performs one. Falls back to a direct focus when navigation is
+    // refused or the AeroSpace client died since the snapshot (the window
+    // is real either way, and AeroSpace follows externally focused windows
+    // when it comes back).
+    private func focus(app: NSRunningApplication, element: AXUIElement?, windowID: Int?,
+                       spaceID: UInt64?, workspace: String? = nil) {
+        // A newer activation supersedes any Space navigation still in
+        // flight, including a chain two-hop's pending workspace leg.
         navigator.cancel()
+        chain.cancelPending()
+        activationGeneration += 1
+        lastCommit = (app, Date())
+        // Record at commit intent, not on arrival focus: didActivate
+        // propagates ~0.1-1s after a switch, but a quick tap lets the user
+        // reopen the switcher within ~200ms and that snapshot must already
+        // rank this window first. The storm snapshot must also beat the
+        // activation's focus-event burst.
+        recency.expectActivation(of: app)
+        if let windowID {
+            recency.noteFocus(windowID: windowID, source: "commit")
+        }
         if app.isHidden {
             app.unhide()
+        }
+        // A window in a hidden AeroSpace workspace sits on THIS native
+        // Space, parked off-screen; one AeroSpace command switches the
+        // workspace and focuses it.
+        if let workspace, let windowID, aerospace.isActive {
+            Log.write("focus: aerospace wid=\(windowID) workspace=\(workspace)")
+            let generation = activationGeneration
+            aerospace.focusWindow(windowID) { [weak self] ok in
+                guard let self, !ok, self.activationGeneration == generation else { return }
+                self.focusWindow(app: app, element: element, windowID: windowID)
+            }
+            return
         }
         // A deterministic AltTab-style focus (setFront+click, macOS performs
         // the transition) does NOT work on macOS 26: the app becomes active

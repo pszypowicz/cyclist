@@ -2,17 +2,34 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = StatusItemController()
+    private let aerospace = AeroSpaceClient()
+    private let wsEvents = WindowServerEvents()
     private var mru: MRUTracker!
+    private var recency: WindowFocusTracker!
     private var controller: SwitcherController!
     private var permissionTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Settings.registerDefaults()
         AX.configureGlobalTimeout()
+        if Settings.aerospaceIntegration {
+            aerospace.start()
+        }
         mru = MRUTracker()
-        controller = SwitcherController(mru: mru)
+        recency = WindowFocusTracker(events: wsEvents)
+        controller = SwitcherController(mru: mru, recency: recency, aerospace: aerospace, events: wsEvents)
+        // Start delivering only after every consumer has wired its callbacks.
+        wsEvents.start()
         controller.onTapInvalidated = { [weak self] in self?.scheduleRecovery() }
         statusItem.setUp()
+        statusItem.onAerospaceToggled = { [weak self] enabled in
+            guard let self else { return }
+            if enabled {
+                self.aerospace.start()
+            } else {
+                self.aerospace.stop()
+            }
+        }
         ensurePermissionAndStart()
         // Optional: unlocks live titles for windows in other Spaces via
         // CGWindowList. Used solely to read titles; Cyclist never captures

@@ -37,4 +37,11 @@ enum CGWindows {
         }
         return result
     }
+
+    // Single-window owner lookup; nil when the window is already gone.
+    static func owner(of windowID: Int) -> pid_t? {
+        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(windowID))
+            as? [[String: Any]]
+        return list?.first?[kCGWindowOwnerPID as String] as? pid_t
+    }
 }

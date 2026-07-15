@@ -9,39 +9,31 @@ import AppKit
 // Space state before acting, and on verified arrival the target window is
 // made key.
 //
-// activeSpaceDidChangeNotification serves only as a wake-up hint that runs
-// the next check sooner; it is never trusted as arrival truth, because it
-// fires while a transition is in flight, when the reported current Space
-// can be garbage. Every wake goes through the same guarded re-read: arrival
-// is concluded only after the outstanding posted swipe has observably
-// landed. Timers remain as the fallback for missed notifications. The swipe
-// pacing floors below stay time-based because no settled-signal exists:
-// SLSManagedDisplayIsAnimating never fires for these instant transitions,
-// and verified bookkeeping arrival precedes compositor safety.
+// The WindowServer's own Space-change events wake the step loop the moment
+// its bookkeeping flips. They are hints only, never arrival truth: they
+// fire while a transition is in flight, when the reported current Space
+// can be garbage. Every wake goes through the same guarded re-read:
+// arrival is concluded only after the outstanding posted swipe has
+// observably landed. Timers remain for swipes the Dock drops outright,
+// where no event ever fires. Posting is event-gated: each swipe waits for
+// the previous transition to land plus a short settle, which the
+// --measure-swipe-floor experiment shows never wedges the compositor
+// (unlike the blind time-based cadence this replaced).
 final class SpaceNavigator {
-    // First arrival check after a post: unloaded, the Space bookkeeping
-    // reflects a swipe ~150-200ms after posting, and checking early cuts
-    // the gap until the arrival focus makes the target window key. Early
-    // polling is safe because a swipe that has not landed yet just
-    // reschedules (the outstandingPost guard); those rechecks and retry
-    // ticks stay on the slower verifyInterval cadence.
+    // First arrival check after a post: the WindowServer space event
+    // normally wakes the step first (bookkeeping flips ~40ms after a
+    // post); the timers are the fallback for swipes the Dock drops.
     private let earlyVerifyInterval: TimeInterval = 0.15
     private let verifyInterval: TimeInterval = 0.4
     private let maxAttempts = 3
-    // The Dock cannot absorb a sustained stream of synthetic dock swipes
-    // faster than roughly one per second: the Space bookkeeping keeps up,
-    // but the WindowServer stops compositing the arrived Space's windows
-    // and the screen shows bare wallpaper until a clean transition.
-    // Measured on macOS 26: six alternating presses at 0.8s cadence wedge
-    // every time and at 1.0s never, while a single quick pair is fine at
-    // any spacing (0/36 down to 0.3s gaps). So the second post in a run
-    // may follow fast, and only from the third consecutive post does the
-    // full floor apply; commands arriving sooner coalesce into the latest
-    // target.
-    private let fastFollowInterval: TimeInterval = 0.45
-    private let minPostInterval: TimeInterval = 1.15
-    // Posts within this trailing window count as one consecutive run.
-    private let runWindow: TimeInterval = 3.0
+    // Settle after a landed transition before the next post. Measured with
+    // --measure-swipe-floor on macOS 26: event-gated bursts never wedge
+    // the compositor at ANY gap (the historical wedge came from blind
+    // time-based posting that landed swipes mid-transition), but below
+    // ~250ms the Dock queues transitions and per-step latency balloons
+    // from ~40ms to ~500ms, so this is the fastest sustained cadence that
+    // stays predictable. A post after idle goes out immediately.
+    private let postSettleGap: TimeInterval = 0.25
 
     private var target: UInt64?
     private var onArrival: (() -> Void)?
@@ -51,35 +43,24 @@ final class SpaceNavigator {
     // care that a navigation was replaced. `outstandingPost` is the Space a
     // posted swipe is still carrying the display toward; until the
     // bookkeeping reflects it, "current" reads as the pre-swipe Space and
-    // must not be used to judge arrival (under sustained input the lag
-    // exceeds the verify interval, and a replaced target would otherwise
+    // must not be used to judge arrival (a replaced target would otherwise
     // fake an instant arrival and leave the in-flight swipe unaccounted).
-    private var recentPosts: [Date] = []
+    // `lastLanded` anchors the settle gap: pacing is measured from the
+    // observed landing of the previous transition, not from the post.
     private var outstandingPost: UInt64?
+    private var lastLanded: Date?
     private var inFlightChecks = 0
-
-    private var spaceChangeObserver: NSObjectProtocol?
 
     // The in-flight destination, so callers can step relative to where
     // navigation is already headed instead of the (stale) current Space.
     var pendingTarget: UInt64? { target }
 
-    init() {
-        spaceChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.activeSpaceDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
+    init(events: WindowServerEvents) {
+        events.onSpaceChanged = { [weak self] spaceID in
             guard let self, self.target != nil else { return }
-            Log.debug("navigator: woken by space-change notification")
+            Log.debug("navigator: woken by ws space event (\(spaceID))")
             self.stepWork?.cancel()
             self.step()
-        }
-    }
-
-    deinit {
-        if let spaceChangeObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserver)
         }
     }
 
@@ -120,6 +101,7 @@ final class SpaceNavigator {
         if let outstanding = outstandingPost {
             if info.current == outstanding {
                 outstandingPost = nil
+                lastLanded = Date()
             } else if inFlightChecks < 3 {
                 inFlightChecks += 1
                 Log.debug("navigator: swipe to \(outstanding) not landed, current=\(info.current) (check \(inFlightChecks))")
@@ -146,24 +128,20 @@ final class SpaceNavigator {
             cancel()
             return
         }
-        let now = Date()
-        recentPosts.removeAll { now.timeIntervalSince($0) > runWindow }
-        if let last = recentPosts.last {
-            let floor = recentPosts.count < 2 ? fastFollowInterval : minPostInterval
-            let sincePost = now.timeIntervalSince(last)
-            if sincePost < floor {
-                Log.debug("navigator hold: \(Int((floor - sincePost) * 1000))ms until next swipe (run \(recentPosts.count), target \(target))")
-                schedule(after: floor - sincePost)
+        if let landed = lastLanded {
+            let sinceLanded = Date().timeIntervalSince(landed)
+            if sinceLanded < postSettleGap {
+                Log.debug("navigator hold: \(Int((postSettleGap - sinceLanded) * 1000))ms settle (target \(target))")
+                schedule(after: postSettleGap - sinceLanded)
                 return
             }
         }
         attempts += 1
         let right = targetIndex > currentIndex
         let distance = abs(targetIndex - currentIndex)
-        let sincePost = recentPosts.last.map { "\(Int(now.timeIntervalSince($0) * 1000))ms" } ?? "-"
-        Log.write("navigator jump (swipe x\(distance), attempt \(attempts), sincePost=\(sincePost)): \(info.current) -> \(target)")
+        let sinceLanded = lastLanded.map { "\(Int(Date().timeIntervalSince($0) * 1000))ms" } ?? "-"
+        Log.write("navigator jump (swipe x\(distance), attempt \(attempts), sinceLanded=\(sinceLanded)): \(info.current) -> \(target)")
         Spaces.postDockSwipes(right: right, steps: distance)
-        recentPosts.append(Date())
         outstandingPost = target
         inFlightChecks = 0
         schedule(after: earlyVerifyInterval)
