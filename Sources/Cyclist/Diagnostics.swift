@@ -14,14 +14,15 @@ enum Diagnostics {
     private typealias ConnectionFn = @convention(c) () -> UInt32
 
     // The capture APIs are compile-time obsoleted in the macOS 26 SDK but
-    // still functional at runtime, so they are resolved dynamically.
+    // still functional at runtime, so they are resolved dynamically;
+    // force-unwrapped like every other private symbol in the app.
     private static let displayCapture = resolve("CGDisplayCreateImageForRect", DisplayCaptureFn.self)
     private static let windowCapture = resolve("CGWindowListCreateImage", WindowCaptureFn.self)
     private static let slsActiveSpace = resolve("SLSGetActiveSpace", ActiveSpaceFn.self)
     private static let mainConnection = resolve("CGSMainConnectionID", ConnectionFn.self)
 
-    private static func resolve<T>(_ name: String, _ type: T.Type) -> T? {
-        dlsym(UnsafeMutableRawPointer(bitPattern: -2), name).map { unsafeBitCast($0, to: type) }
+    private static func resolve<T>(_ name: String, _ type: T.Type) -> T {
+        unsafeBitCast(dlsym(UnsafeMutableRawPointer(bitPattern: -2), name)!, to: type)
     }
 
     // Schedules a composite check shortly after a verified arrival, once
@@ -38,7 +39,7 @@ enum Diagnostics {
         guard let info = Spaces.activeDisplayInfo(), info.current == space else { return }
         guard let verdict = compositeVerdict(space: space), !verdict.composited else { return }
         let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
-        let slsActive = mainConnection.flatMap { connection in slsActiveSpace?(connection()) } ?? 0
+        let slsActive = slsActiveSpace(mainConnection())
         Log.error("WEDGE: space=\(space) wid=\(verdict.windowID) screenRGB=\(verdict.screen)"
             + " windowRGB=\(verdict.content) dist=\(verdict.distance) slsActive=\(slsActive)"
             + " front=\(front): arrived Space not composited (bookkeeping healthy, screen shows wallpaper)")
@@ -64,11 +65,11 @@ enum Diagnostics {
         let patch = CGRect(x: window.bounds.midX - 32 - displayBounds.minX,
                            y: window.bounds.midY - 32 - displayBounds.minY,
                            width: 64, height: 64)
-        guard let screenImage = displayCapture?(display, patch)?.takeRetainedValue(),
+        guard let screenImage = displayCapture(display, patch)?.takeRetainedValue(),
               let screen = meanRGB(screenImage) else { return nil }
         // 8 = kCGWindowListOptionIncludingWindow
-        guard let contentImage = windowCapture?(patch.offsetBy(dx: displayBounds.minX, dy: displayBounds.minY),
-                                                8, UInt32(window.id), 0)?.takeRetainedValue(),
+        guard let contentImage = windowCapture(patch.offsetBy(dx: displayBounds.minX, dy: displayBounds.minY),
+                                               8, UInt32(window.id), 0)?.takeRetainedValue(),
               let content = meanRGB(contentImage) else { return nil }
         let distance = abs(screen.0 - content.0) + abs(screen.1 - content.1) + abs(screen.2 - content.2)
         return CompositeVerdict(composited: distance <= 60, windowID: window.id,
