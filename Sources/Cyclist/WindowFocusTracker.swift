@@ -42,8 +42,6 @@ final class WindowFocusTracker {
             self, selector: #selector(didActivate(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
         events.onFocused = { [weak self] windowID in self?.handleFocus(windowID) }
-        // Destroy events keep the map tight; the size cap in noteFocus
-        // stays as a backstop for missed ones.
         events.onDestroyed = { [weak self] windowID in
             self?.sequence.removeValue(forKey: windowID)
         }
@@ -51,15 +49,12 @@ final class WindowFocusTracker {
 
     // The single mutation point. Recording is idempotent per focus change,
     // so duplicate deliveries (a commit followed by its own focus event)
-    // just advance the same window's rank.
+    // just advance the same window's rank. Destroy events retire dead
+    // entries, so the map stays bounded by the live window count.
     func noteFocus(windowID: Int, source: String) {
         counter += 1
         sequence[windowID] = counter
         Log.debug("recency: wid=\(windowID) seq=\(counter) via \(source)")
-        if sequence.count > 2048 {
-            let cutoff = sequence.values.sorted(by: >)[1024]
-            sequence = sequence.filter { $0.value > cutoff }
-        }
     }
 
     // 0 = never seen (or no window id); real ranks start at 1.

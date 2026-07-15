@@ -19,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recency = WindowFocusTracker(events: wsEvents)
         controller = SwitcherController(mru: mru, recency: recency, aerospace: aerospace, events: wsEvents)
         // Start delivering only after every consumer has wired its callbacks.
-        _ = wsEvents.start()
+        wsEvents.start()
         controller.onTapInvalidated = { [weak self] in self?.scheduleRecovery() }
         statusItem.setUp()
         statusItem.onAerospaceToggled = { [weak self] enabled in

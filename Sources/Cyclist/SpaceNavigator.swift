@@ -9,16 +9,15 @@ import AppKit
 // Space state before acting, and on verified arrival the target window is
 // made key.
 //
-// The WindowServer's own Space-change events are the primary wake-up hint
-// (they fire the moment its bookkeeping flips, well before AppKit's
-// activeSpaceDidChangeNotification relays the change, which stays wired as
-// a fallback). Both are hints only, never arrival truth: they fire while a
-// transition is in flight, when the reported current Space can be garbage.
-// Every wake goes through the same guarded re-read: arrival is concluded
-// only after the outstanding posted swipe has observably landed. Timers
-// remain as the fallback for missed events. The swipe pacing floors below
-// stay time-based because no settled-signal exists: bookkeeping arrival
-// (which is what the Space events announce) precedes compositor safety.
+// The WindowServer's own Space-change events wake the step loop the moment
+// its bookkeeping flips. They are hints only, never arrival truth: they
+// fire while a transition is in flight, when the reported current Space
+// can be garbage. Every wake goes through the same guarded re-read:
+// arrival is concluded only after the outstanding posted swipe has
+// observably landed. Timers remain for swipes the Dock drops outright,
+// where no event ever fires. The swipe pacing floors below stay
+// time-based because no settled-signal exists: bookkeeping arrival (what
+// the Space events announce) precedes compositor safety.
 final class SpaceNavigator {
     // First arrival check after a post: unloaded, the Space bookkeeping
     // reflects a swipe ~150-200ms after posting, and checking early cuts
@@ -59,8 +58,6 @@ final class SpaceNavigator {
     private var outstandingPost: UInt64?
     private var inFlightChecks = 0
 
-    private var spaceChangeObserver: NSObjectProtocol?
-
     // The in-flight destination, so callers can step relative to where
     // navigation is already headed instead of the (stale) current Space.
     var pendingTarget: UInt64? { target }
@@ -71,22 +68,6 @@ final class SpaceNavigator {
             Log.debug("navigator: woken by ws space event (\(spaceID))")
             self.stepWork?.cancel()
             self.step()
-        }
-        spaceChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.activeSpaceDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self, self.target != nil else { return }
-            Log.debug("navigator: woken by space-change notification")
-            self.stepWork?.cancel()
-            self.step()
-        }
-    }
-
-    deinit {
-        if let spaceChangeObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserver)
         }
     }
 

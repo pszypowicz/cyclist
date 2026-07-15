@@ -10,16 +10,17 @@ private func CGSMainConnectionID() -> UInt32
 
 // SLS symbols live in the private SkyLight framework, which cannot be linked
 // against (no on-disk stub); AppKit loads it into every GUI process, so the
-// symbol is resolved at runtime instead.
+// symbol is resolved at runtime instead. Resolution is force-unwrapped: the
+// app targets the macOS version it runs on, and without these symbols there
+// is nothing useful it could do.
 private typealias SLSCopyWindowsWithOptionsAndTagsFn = @convention(c) (
     UInt32, UInt32, CFArray, UInt32,
     UnsafeMutablePointer<UInt64>, UnsafeMutablePointer<UInt64>
 ) -> Unmanaged<CFArray>?
 
-private func resolve<T>(_ name: String, as type: T.Type) -> T? {
+private func resolve<T>(_ name: String, as type: T.Type) -> T {
     let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
-    guard let symbol = dlsym(rtldDefault, name) else { return nil }
-    return unsafeBitCast(symbol, to: type)
+    return unsafeBitCast(dlsym(rtldDefault, name)!, to: type)
 }
 
 private let SLSCopyWindowsWithOptionsAndTags =
@@ -101,12 +102,11 @@ enum Spaces {
 
     // The managed-display dict of the display whose menu bar is active: the
     // display keyboard focus follows, and the only one the synthetic dock
-    // swipes can act on. Falls back to the first listed display when the SLS
-    // symbol or a match is unavailable.
+    // swipes can act on. Falls back to the first listed display when no
+    // identifier matches.
     private static func activeDisplay() -> [String: Any]? {
         let displays = managedDisplays()
-        guard let copyIdentifier = SLSCopyActiveMenuBarDisplayIdentifier,
-              let active = copyIdentifier(CGSMainConnectionID())?.takeRetainedValue() as String?
+        guard let active = SLSCopyActiveMenuBarDisplayIdentifier(CGSMainConnectionID())?.takeRetainedValue() as String?
         else { return displays.first }
         let target = canonicalUUID(active)
         return displays.first {
@@ -163,28 +163,22 @@ enum Spaces {
     // own records tell them apart: a window the user can hold carries tag
     // bit 0x1 (or the 0x2 + 0x80000000 combination) alongside attribute
     // bit 0x2 - the same predicate yabai filters with. One batched query
-    // covers all candidates; missing symbols keep the unfiltered set.
+    // covers all candidates.
     private static func realWindows(among windowIDs: Set<Int>) -> Set<Int> {
         guard !windowIDs.isEmpty,
-              let queryWindows = SLSWindowQueryWindows,
-              let copyResult = SLSWindowQueryResultCopyWindows,
-              let advance = SLSWindowIteratorAdvance,
-              let getWindowID = SLSWindowIteratorGetWindowID,
-              let getAttributes = SLSWindowIteratorGetAttributes,
-              let getTags = SLSWindowIteratorGetTags,
-              let query = queryWindows(CGSMainConnectionID(),
-                                       windowIDs.map { UInt32($0) } as CFArray,
-                                       Int32(windowIDs.count))?.takeRetainedValue(),
-              let iterator = copyResult(query)?.takeRetainedValue() else {
+              let query = SLSWindowQueryWindows(CGSMainConnectionID(),
+                                                windowIDs.map { UInt32($0) } as CFArray,
+                                                Int32(windowIDs.count))?.takeRetainedValue(),
+              let iterator = SLSWindowQueryResultCopyWindows(query)?.takeRetainedValue() else {
             return windowIDs
         }
         var real: Set<Int> = []
-        while advance(iterator) {
-            let attributes = getAttributes(iterator)
-            let tags = getTags(iterator)
+        while SLSWindowIteratorAdvance(iterator) {
+            let attributes = SLSWindowIteratorGetAttributes(iterator)
+            let tags = SLSWindowIteratorGetTags(iterator)
             guard attributes & 0x2 != 0 || tags & 0x0400_0000_0000_0000 != 0 else { continue }
             guard tags & 0x1 != 0 || (tags & 0x2 != 0 && tags & 0x8000_0000 != 0) else { continue }
-            real.insert(Int(getWindowID(iterator)))
+            real.insert(Int(SLSWindowIteratorGetWindowID(iterator)))
         }
         return real
     }
@@ -201,20 +195,14 @@ enum Spaces {
     // is 0x100 although the record says 0xf8: the WindowServer reads past
     // the record on macOS 14.7.4+ and crashes on a tight allocation.
     static func makeKey(pid: pid_t, windowID: Int) {
-        guard let setFront = SLPSSetFrontProcessWithOptions,
-              let postEvent = SLPSPostEventRecordTo,
-              let getPSN = GetProcessForPIDFallback else {
-            Log.write("makeKey: symbol resolution failed")
-            return
-        }
         var psn = ProcessSerialNumber()
-        let psnErr = getPSN(pid, &psn)
+        let psnErr = GetProcessForPIDFallback(pid, &psn)
         guard psnErr == 0 else {
             Log.write("makeKey: GetProcessForPID(\(pid)) failed: \(psnErr)")
             return
         }
         let wid = UInt32(windowID)
-        let frontErr = setFront(&psn, wid, 0x200)  // kCPSUserGenerated
+        let frontErr = SLPSSetFrontProcessWithOptions(&psn, wid, 0x200)  // kCPSUserGenerated
         Log.write("makeKey: pid=\(pid) wid=\(wid) setFront=\(frontErr)")
         let point = CGPoint(x: -1, y: -1)
         var bytes = [UInt8](repeating: 0, count: 0x100)
@@ -225,16 +213,15 @@ enum Spaces {
             $0.storeBytes(of: point, toByteOffset: 0x20, as: CGPoint.self)
         }
         bytes[0x08] = 0x01  // kCGEventLeftMouseDown
-        _ = postEvent(&psn, &bytes)
+        _ = SLPSPostEventRecordTo(&psn, &bytes)
         bytes[0x08] = 0x02  // kCGEventLeftMouseUp
-        _ = postEvent(&psn, &bytes)
+        _ = SLPSPostEventRecordTo(&psn, &bytes)
     }
 
     static func windowIDs(inSpace spaceID: UInt64) -> Set<Int> {
-        guard let copyWindows = SLSCopyWindowsWithOptionsAndTags else { return [] }
         var setTags: UInt64 = 0
         var clearTags: UInt64 = 0
-        guard let list = copyWindows(
+        guard let list = SLSCopyWindowsWithOptionsAndTags(
             CGSMainConnectionID(), 0, [NSNumber(value: spaceID)] as CFArray, 0x2, &setTags, &clearTags
         )?.takeRetainedValue() as? [NSNumber] else { return [] }
         return Set(list.map { $0.intValue })

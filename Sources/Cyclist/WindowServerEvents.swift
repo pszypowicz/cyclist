@@ -19,10 +19,11 @@ private typealias RequestNotificationsForWindowsFn = @convention(c) (
     UInt32, UnsafeMutablePointer<UInt32>, Int32
 ) -> CGError
 
-private func resolve<T>(_ name: String, as type: T.Type) -> T? {
+// Force-unwrapped: the app targets the macOS version it runs on, and
+// without the notification stream there is nothing useful it could do.
+private func resolve<T>(_ name: String, as type: T.Type) -> T {
     let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
-    guard let symbol = dlsym(rtldDefault, name) else { return nil }
-    return unsafeBitCast(symbol, to: type)
+    return unsafeBitCast(dlsym(rtldDefault, name)!, to: type)
 }
 
 private let SLSRegisterConnectionNotifyProc =
@@ -81,21 +82,13 @@ final class WindowServerEvents {
     private var optedIn: Set<UInt32> = []
     private var pushPending = false
 
-    // Registers the notify procs and seeds the opt-in set. Returns false
-    // when the SkyLight symbols are missing (a future macOS could remove
-    // them); consumers then run on their fallback signals instead of
-    // breaking.
-    func start() -> Bool {
-        guard let register = SLSRegisterConnectionNotifyProc,
-              SLSRequestNotificationsForWindows != nil else {
-            Log.write("wsevents: SkyLight notify symbols missing; falling back")
-            return false
-        }
+    // Registers the notify procs and seeds the opt-in set.
+    func start() {
         let cid = CGSMainConnectionID()
         let context = Unmanaged.passUnretained(self).toOpaque()
         for event in [Self.windowFocused, Self.windowCreated, Self.windowDestroyed,
                       Self.spaceCurrentChanged, Self.activeSpaceChanged] {
-            _ = register(cid, notifyProc, event, context)
+            _ = SLSRegisterConnectionNotifyProc(cid, notifyProc, event, context)
         }
         // Seed with every real window on every Space: other-Space windows
         // (native fullscreen included) never appear in on-screen lists but
@@ -105,7 +98,6 @@ final class WindowServerEvents {
         }
         pushOptIns()
         Log.write("wsevents: stream active, \(optedIn.count) windows opted in")
-        return true
     }
 
     fileprivate func handle(event: UInt32, windowID: UInt32, spaceID: UInt64) {
@@ -141,8 +133,8 @@ final class WindowServerEvents {
     }
 
     private func pushOptIns() {
-        guard let request = SLSRequestNotificationsForWindows, !optedIn.isEmpty else { return }
+        guard !optedIn.isEmpty else { return }
         var list = Array(optedIn)
-        _ = request(CGSMainConnectionID(), &list, Int32(list.count))
+        _ = SLSRequestNotificationsForWindows(CGSMainConnectionID(), &list, Int32(list.count))
     }
 }
