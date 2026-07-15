@@ -277,10 +277,16 @@ final class SwitcherController {
     // window is the suggestion, not another app - and after coming from
     // another app, that app's window outranks the stale sibling. One rule
     // covers both: the best-ranked window that is not the one holding
-    // focus. Rows without ranks fall back to the previous-app heuristic.
+    // focus. The held window comes from the WindowServer's z-order (the
+    // topmost on-screen real window), not from the focus-event stream:
+    // event-derived "current" goes stale in the gap between a focus
+    // change and its notifications, and a stale exclusion makes the tap
+    // re-commit the very window the user is on (observed after entering
+    // a fullscreen Space). Rows without ranks fall back to the
+    // previous-app heuristic.
     private func initialAppsIndex(items: [ListEntry], backward: Bool) -> Int {
         if backward { return items.count - 1 }
-        let current = recency.latestWindowID
+        let current = CGWindows.real([.optionOnScreenOnly]).first?.id
         var best: (index: Int, rank: UInt64)?
         for (index, item) in items.enumerated() {
             guard let windowID = item.windowID, windowID != current else { continue }
