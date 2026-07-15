@@ -4,7 +4,7 @@ import AppKit
 // notifications. Position 0 is the frontmost app, position 1 the app a quick
 // Cmd+Tab should switch back to.
 final class MRUTracker {
-    private(set) var order: [pid_t] = []
+    private var order: [pid_t] = []
 
     init() {
         if let front = NSWorkspace.shared.frontmostApplication {

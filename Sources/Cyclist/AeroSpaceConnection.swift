@@ -47,9 +47,12 @@ final class AeroSpaceConnection {
     private struct Request {
         let args: [String]
         let coalescingKey: String?
-        let timeout: TimeInterval
         let completion: (Result<AeroSpaceAnswer, RequestError>) -> Void
     }
+
+    // Generous against the observed worst case (~35ms per command on the
+    // AeroSpace main thread); expiry means the stream is unsynchronized.
+    private let requestTimeout: TimeInterval = 1.5
 
     private var pending: [Request] = []
     // The request whose answer is being awaited. Kept (not just a flag) so
@@ -57,7 +60,6 @@ final class AeroSpaceConnection {
     // fallback focus paths, and a dropped one leaves them hanging.
     private var inFlight: Request?
     private var timeoutWork: DispatchWorkItem?
-    private var eventMode = false
 
     init(label: String) {
         self.label = label
@@ -127,9 +129,8 @@ final class AeroSpaceConnection {
     // lost answer later can never be re-synchronized.
     func send(args: [String],
               coalescingKey: String? = nil,
-              timeout: TimeInterval = 1.5,
               completion: @escaping (Result<AeroSpaceAnswer, RequestError>) -> Void) {
-        guard !closed, !eventMode, connection != nil else {
+        guard !closed, connection != nil else {
             completion(.failure(.failed("connection closed")))
             return
         }
@@ -137,8 +138,7 @@ final class AeroSpaceConnection {
            let replaced = pending.firstIndex(where: { $0.coalescingKey == coalescingKey }) {
             pending.remove(at: replaced).completion(.failure(.superseded))
         }
-        pending.append(Request(args: args, coalescingKey: coalescingKey,
-                               timeout: timeout, completion: completion))
+        pending.append(Request(args: args, coalescingKey: coalescingKey, completion: completion))
         pump()
     }
 
@@ -165,7 +165,7 @@ final class AeroSpaceConnection {
             self?.fail("request timed out: \(request.args.joined(separator: " "))")
         }
         timeoutWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + request.timeout, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + requestTimeout, execute: work)
 
         receiveFrame { [weak self] data in
             guard let self, !self.closed else { return }
@@ -196,7 +196,6 @@ final class AeroSpaceConnection {
     // connection like any transport failure.
     func subscribe(to events: [String], onEvent: @escaping ([String: Any]) -> Void) {
         guard !closed, let connection else { return }
-        eventMode = true
         let body: [String: Any] = [
             "args": ["subscribe"] + events, "stdin": "",
             "windowId": NSNull(), "workspace": NSNull(),
