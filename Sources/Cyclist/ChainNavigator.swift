@@ -135,7 +135,7 @@ final class ChainNavigator {
 
     // MARK: - ring construction
 
-    private typealias DisplayInfo = (order: [UInt64], types: [UInt64: Int], current: UInt64)
+    private typealias DisplayInfo = Spaces.DisplayInfo
 
     private func resolveRing(_ display: DisplayInfo) -> ([RingElement], RingElement)? {
         // A mid-refresh cache (focused workspace not in the list yet)

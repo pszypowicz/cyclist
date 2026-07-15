@@ -43,17 +43,6 @@ enum AX {
         return Int(wid)
     }
 
-    // The window the app itself considers focused. Read off the app
-    // element, not Space-gated like kAXWindowsAttribute, so it answers for
-    // a fullscreen window while its app is frontmost.
-    static func focusedWindowID(pid: pid_t) -> Int? {
-        let appElement = AXUIElementCreateApplication(pid)
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
-        return windowID(of: value as! AXUIElement)
-    }
-
     static func configureGlobalTimeout() {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.05)
     }

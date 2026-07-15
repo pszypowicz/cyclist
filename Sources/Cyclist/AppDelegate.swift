@@ -57,9 +57,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             timer.invalidate()
             self.permissionTimer = nil
             Log.write("event tap running")
-            // On first launch the tracker attached before the Accessibility
-            // grant existed; re-seed now that AX answers.
-            self.recency.attachToFrontmost()
         }
     }
 }

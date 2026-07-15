@@ -361,6 +361,7 @@ final class SwitcherController {
            let url = app.bundleURL {
             navigator.cancel()
             lastCommit = (app, Date())
+            recency.expectActivation(of: app)
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
@@ -390,7 +391,9 @@ final class SwitcherController {
         // Record at commit intent, not on arrival focus: didActivate
         // propagates ~0.1-1s after a switch, but a quick tap lets the user
         // reopen the switcher within ~200ms and that snapshot must already
-        // rank this window first.
+        // rank this window first. The storm snapshot must also beat the
+        // activation's focus-event burst.
+        recency.expectActivation(of: app)
         if let windowID {
             recency.noteFocus(windowID: windowID, source: "commit")
         }
