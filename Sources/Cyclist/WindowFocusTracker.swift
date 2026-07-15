@@ -47,6 +47,15 @@ final class WindowFocusTracker {
             self, selector: #selector(didActivate(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
         events.onFocused = { [weak self] windowID in self?.handleFocus(windowID) }
+        // A brand-new window's first focus event races the per-window
+        // opt-in push and can be gated away, leaving the window the user
+        // is typing in unranked - and unrankable until a later focus. New
+        // windows almost always hold focus next, so rank them on creation
+        // (a window created in the background mis-ranks briefly and the
+        // next real focus corrects it).
+        events.onCreated = { [weak self] windowID in
+            self?.noteFocus(windowID: windowID, source: "created")
+        }
         events.onDestroyed = { [weak self] windowID in
             self?.sequence.removeValue(forKey: windowID)
         }

@@ -54,6 +54,12 @@ final class SwitcherController {
     private let escapeKey: Int64 = 53
     private let leftArrowKey: Int64 = 123
     private let rightArrowKey: Int64 = 124
+    private let upArrowKey: Int64 = 126
+    private let downArrowKey: Int64 = 125
+    private let jKey: Int64 = 38
+    private let kKey: Int64 = 40
+    private let qKey: Int64 = 12
+    private let wKey: Int64 = 13
 
     init(mru: MRUTracker, recency: WindowFocusTracker, aerospace: AeroSpaceClient, events: WindowServerEvents) {
         self.mru = mru
@@ -101,8 +107,33 @@ final class SwitcherController {
             let left = keyCode == leftArrowKey
             DispatchQueue.main.async { [weak self] in self?.chain.navigate(left: left) }
             return true
+        // List keys live only inside a session (Cmd held): outside one,
+        // arrows, j/k, q, and w pass through untouched.
+        case downArrowKey where session != nil, jKey where session != nil:
+            advanceCurrent(backward: false)
+            return true
+        case upArrowKey where session != nil, kKey where session != nil:
+            advanceCurrent(backward: true)
+            return true
+        case qKey where session != nil:
+            quitSelected()
+            return true
+        case wKey where session != nil:
+            closeSelectedWindow()
+            return true
         default:
             return false
+        }
+    }
+
+    private func advanceCurrent(backward: Bool) {
+        switch session {
+        case .apps, .pendingApps:
+            advanceApps(backward: backward)
+        case .windows, .pendingWindows:
+            advanceWindows(backward: backward)
+        case nil:
+            break
         }
     }
 
@@ -311,6 +342,82 @@ final class SwitcherController {
     private func step(_ index: Int, count: Int, backward: Bool) -> Int {
         guard count > 0 else { return 0 }
         return (index + (backward ? count - 1 : 1)) % count
+    }
+
+    // Quit the selected row's app, like native Cmd+Tab's Q: its rows leave
+    // the list and the session continues on whatever remains.
+    private func quitSelected() {
+        switch session {
+        case .apps(let items, let index):
+            let app = items[index].app
+            Log.write("quit: app=\(items[index].appName) pid=\(app.processIdentifier)")
+            app.terminate()
+            let survivors = items.enumerated().filter {
+                $0.element.app.processIdentifier != app.processIdentifier
+            }
+            applyAppsSession(survivors.map(\.element),
+                             selectedNear: survivors.filter { $0.offset < index }.count)
+        case .windows(let app, _, _):
+            // Every row belongs to the quit app; nothing left to browse.
+            Log.write("quit: app=\(app.localizedName ?? "?") pid=\(app.processIdentifier)")
+            app.terminate()
+            cancel()
+        case .pendingApps, .pendingWindows, nil:
+            break
+        }
+    }
+
+    // Close just the selected window. Only rows with an AX element can
+    // close - other-Space rows carry no handle to press.
+    private func closeSelectedWindow() {
+        switch session {
+        case .apps(let items, let index):
+            let entry = items[index]
+            guard let element = entry.axWindow else {
+                Log.write("close: no AX handle for \(entry.appName)")
+                return
+            }
+            Log.write("close: app=\(entry.appName) wid=\(entry.windowID.map(String.init) ?? "-")")
+            AX.close(element)
+            var remaining = items
+            remaining.remove(at: index)
+            applyAppsSession(remaining, selectedNear: index)
+        case .windows(let app, let items, let index):
+            let item = items[index]
+            guard let element = item.element else {
+                Log.write("close: no AX handle for wid=\(item.windowID.map(String.init) ?? "-")")
+                return
+            }
+            Log.write("close: app=\(app.localizedName ?? "?") wid=\(item.windowID.map(String.init) ?? "-")")
+            AX.close(element)
+            var remaining = items
+            remaining.remove(at: index)
+            guard !remaining.isEmpty else {
+                cancel()
+                return
+            }
+            let clamped = min(index, remaining.count - 1)
+            session = .windows(app, remaining, index: clamped)
+            panel.setRows(remaining.map {
+                SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
+                            annotation: annotation(for: $0))
+            }, selected: clamped)
+        case .pendingApps, .pendingWindows, nil:
+            break
+        }
+    }
+
+    private func applyAppsSession(_ items: [ListEntry], selectedNear index: Int) {
+        guard !items.isEmpty else {
+            cancel()
+            return
+        }
+        let clamped = min(index, items.count - 1)
+        session = .apps(items, index: clamped)
+        panel.setRows(items.map {
+            SwitcherRow(icon: $0.app.icon, title: $0.appName, subtitle: $0.windowTitle,
+                        annotation: annotation(for: $0))
+        }, selected: clamped)
     }
 
     private func annotation(for entry: ListEntry) -> String? {

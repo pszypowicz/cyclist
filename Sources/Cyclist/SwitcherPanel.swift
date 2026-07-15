@@ -63,7 +63,13 @@ final class SwitcherPanel {
     private var panel: NSPanel
     private let model = SwitcherViewModel()
 
+    // Must mirror the SwitcherView layout: row content plus its vertical
+    // padding, the VStack spacing between rows, and the VStack padding.
+    // Undercounting any of them makes the content overflow the window, so
+    // the bottom inset visually vanishes as the list grows.
     private let rowHeight: CGFloat = 28
+    private let rowSpacing: CGFloat = 2
+    private let contentPadding: CGFloat = 8
     private let width: CGFloat = 520
     private let maxHeight: CGFloat = 560
 
@@ -113,6 +119,11 @@ final class SwitcherPanel {
     func setRows(_ rows: [SwitcherRow], selected: Int) {
         model.rows = rows
         model.selected = selected
+        // Rows can shrink mid-session (quit/close from the list); a visible
+        // panel resizes to fit instead of keeping dead space.
+        if panel.isVisible {
+            layout()
+        }
     }
 
     // Advancing the selection means the user is browsing, so the panel shows
@@ -133,7 +144,9 @@ final class SwitcherPanel {
     }
 
     private func layout() {
-        let height = min(CGFloat(model.rows.count) * rowHeight + 16, maxHeight)
+        let rows = CGFloat(model.rows.count)
+        let content = rows * rowHeight + max(0, rows - 1) * rowSpacing + contentPadding * 2
+        let height = min(content, maxHeight)
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let frame = screen.visibleFrame
         let origin = NSPoint(x: frame.midX - width / 2, y: frame.midY - height / 2)
