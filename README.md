@@ -10,10 +10,11 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 
 ## What it does
 
-- Replaces the native Cmd+Tab switcher with a vertical, text-only list in most-recently-used app order. Every window gets its own row (`App - Window title`), so two Safari windows are two entries.
+- Replaces the native Cmd+Tab switcher with a vertical, text-only list in most-recently-used app order. Every window gets its own row (`App - Window title`), so two Safari windows are two entries, and within an app the rows are ordered by when you last used each window.
+- A quick Cmd+Tab tap returns to the previous window, wherever it lives - even between two windows of the same app, and even across Spaces or workspaces.
 - Windows in other Spaces (including native fullscreen) get their own rows too. With Screen Recording permission granted their titles are live; without it, each row shows the last title Cyclist saw while that window was visible. Selecting a row jumps straight to that Space.
 - A separate binding (Cmd+`) cycles through the windows of the frontmost app in most-recently-used order, including minimized ones and windows in other Spaces (native fullscreen included) - things the native window cycler skips. A quick tap bounces between the app's last two windows.
-- Ctrl+Left/Right walks the native Spaces of the primary display in Mission Control order - user desktops and fullscreen Spaces alike - instantly and without animation. Arriving on a desktop focuses its top window, so leaving a fullscreen app always lands somewhere concrete.
+- Ctrl+Left/Right walks the native Spaces of the active display (the one holding the menu bar) in Mission Control order - user desktops and fullscreen Spaces alike - instantly and without animation. Arriving on a desktop focuses its top window, so leaving a fullscreen app always lands somewhere concrete.
 - With [AeroSpace](https://github.com/nikitabobko/AeroSpace) running, its workspaces join that ring in place of the desktop hosting them, so Ctrl+Left/Right walks `workspace 1 ... workspace N, fullscreen Spaces` seamlessly - workspace steps go over AeroSpace's socket, and crossing from a fullscreen Space lands on the ring-adjacent workspace. Windows parked in hidden workspaces appear in the switcher as `workspace N` rows; selecting one switches there. Detection is automatic and everything falls back to plain native behavior the moment AeroSpace is absent, disabled, or the menu-bar toggle is off.
 - Four independent settings control what shows up in the list:
   - include **hidden** apps (Cmd+H)
@@ -35,6 +36,8 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 | Esc (while open)    | Cancel                                        |
 | Release Cmd         | Switch to the selected item                   |
 | Ctrl+Left / Right   | Previous / next workspace or fullscreen Space |
+
+Quit and Close edit the open list in place: the affected rows leave, the selection moves to a neighbor, and the session ends only when nothing is left. Finder is exempt from Quit unless you opt in with `defaults write com.apple.finder QuitMenuItem -bool true` (the switch the Dock honors); otherwise Q on Finder just beeps.
 
 Shortcuts are hardcoded in this release and use physical key positions (Tab and the key left of 1), so they may land oddly on some non-US layouts.
 
