@@ -272,13 +272,29 @@ final class SwitcherController {
         return NSWorkspace.shared.frontmostApplication
     }
 
-    // A quick tap should land on the previous app, not on another window of
-    // the frontmost app, whose windows head the MRU list.
+    // A quick tap goes to the previously used WINDOW, wherever it lives:
+    // after deliberately visiting two windows of one app, the sibling
+    // window is the suggestion, not another app - and after coming from
+    // another app, that app's window outranks the stale sibling. One rule
+    // covers both: the best-ranked window that is not the one holding
+    // focus. Rows without ranks fall back to the previous-app heuristic.
     private func initialAppsIndex(items: [ListEntry], backward: Bool) -> Int {
+        if backward { return items.count - 1 }
+        let current = recency.latestWindowID
+        var best: (index: Int, rank: UInt64)?
+        for (index, item) in items.enumerated() {
+            guard let windowID = item.windowID, windowID != current else { continue }
+            let rank = recency.rank(of: windowID)
+            if rank > 0, rank > (best?.rank ?? 0) {
+                best = (index, rank)
+            }
+        }
+        if let best {
+            return best.index
+        }
         let front = frontmostForSessions()?.processIdentifier
         let firstOtherApp = items.firstIndex { $0.app.processIdentifier != front }
-        let forwardStart = firstOtherApp ?? (items.count > 1 ? 1 : 0)
-        return backward ? items.count - 1 : forwardStart
+        return firstOtherApp ?? (items.count > 1 ? 1 : 0)
     }
 
     private func startIndex(count: Int, backward: Bool) -> Int {

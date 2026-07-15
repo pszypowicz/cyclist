@@ -25,6 +25,9 @@ final class WindowFocusTracker {
     // windowID -> monotonic focus sequence; higher = more recent.
     private var sequence: [Int: UInt64] = [:]
     private var counter: UInt64 = 0
+    // The window holding focus right now, i.e. the last one recorded; the
+    // switcher's quick tap suggests the best-ranked window EXCLUDING this.
+    private(set) var latestWindowID: Int?
 
     private var storm: (pid: pid_t, windowIDs: Set<Int>, sawFocus: Bool, until: Date)?
 
@@ -54,6 +57,7 @@ final class WindowFocusTracker {
     func noteFocus(windowID: Int, source: String) {
         counter += 1
         sequence[windowID] = counter
+        latestWindowID = windowID
         Log.debug("recency: wid=\(windowID) seq=\(counter) via \(source)")
     }
 

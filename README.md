@@ -25,7 +25,7 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 
 | Keys                | Action                                        |
 | ------------------- | --------------------------------------------- |
-| Cmd+Tab (quick tap) | Switch to the previous app                    |
+| Cmd+Tab (quick tap) | Switch to the previous window (any app)       |
 | Cmd+Tab (hold Cmd)  | Open the list; each Tab advances              |
 | Cmd+Shift+Tab       | Cycle backward                                |
 | Cmd+`               | Cycle windows of the frontmost app            |
