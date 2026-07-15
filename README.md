@@ -8,6 +8,10 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 
 > **Beta.** Cyclist is in early development (0.x). Expect rough edges, hardcoded shortcuts, and breaking changes between releases.
 
+<p align="center">
+  <img src="docs/demo.svg" width="830" alt="Hold Cmd to open a vertical text list where every window is its own row, some tagged 'other space'; move the selection to a Safari window that lives in a fullscreen Space, release Cmd, and the display jumps straight to that Space.">
+</p>
+
 ## What it does
 
 - Replaces the native Cmd+Tab switcher with a vertical, text-only list in most-recently-used app order. Every window gets its own row (`App - Window title`), so two Safari windows are two entries, and within an app the rows are ordered by when you last used each window.
@@ -79,3 +83,11 @@ On first launch Cyclist prompts for Accessibility permission and activates itsel
 - The AeroSpace bridge speaks the server's socket protocol (version 1) and tracks the workspaces of AeroSpace's focused monitor. With several native desktops the ring only expands the current one.
 - The list is keyboard-only; the panel ignores mouse clicks.
 - Shortcuts are not yet rebindable.
+
+## Acknowledgements
+
+Cyclist relies on techniques that other projects worked out first:
+
+- **Near-instant cross-Space jumps** (Ctrl+Left/Right and jumping to another Space's window) post the synthetic Dock-swipe gesture encoding from [Space Rabbit](https://github.com/Tahul/space-rabbit) - the same approach seen in InstantSpaceSwitcher and Spaceman. macOS performs no Space transition for a plain app activation, so the switch is driven by posting the gesture a trackpad would.
+- **Window and focus detection** follows [AltTab](https://github.com/lwouis/alt-tab-macos) and [yabai](https://github.com/koekeishiya/yabai): reading focus changes, Space membership, and real-window state from the WindowServer's own notification stream and window records instead of the Accessibility API, and the tag/attribute predicate that filters out a fullscreen Space's companion windows.
+- **The AeroSpace bridge** talks directly to [AeroSpace](https://github.com/nikitabobko/AeroSpace)'s socket.
