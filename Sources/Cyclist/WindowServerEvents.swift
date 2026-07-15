@@ -6,7 +6,7 @@ private func CGSMainConnectionID() -> UInt32
 // The per-connection notification callback: (event id, payload, payload
 // length, context, connection id). The WindowServer invokes it on whichever
 // thread receives the datagram; the payload pointer is only valid during
-// the call, so the window id is extracted synchronously and the rest hops
+// the call, so the integers are extracted synchronously and the rest hops
 // to the main queue.
 private typealias ConnectionNotifyProc = @convention(c) (
     UInt32, UnsafeMutableRawPointer?, Int, UnsafeMutableRawPointer?, UInt32
@@ -32,54 +32,69 @@ private let SLSRequestNotificationsForWindows =
 
 // The C callback cannot capture; the stream is recovered through the
 // context pointer. Safe because the stream is owned for the process
-// lifetime and registrations are never torn down.
+// lifetime and registrations are never torn down. Window events carry the
+// window id in the first 4 payload bytes; Space events carry the space id
+// in the first 8.
 private let notifyProc: ConnectionNotifyProc = { event, data, length, context, _ in
     guard let context else { return }
     var windowID: UInt32 = 0
+    var spaceID: UInt64 = 0
     if let data, length >= 4 {
         memcpy(&windowID, data, 4)
     }
-    let stream = Unmanaged<WindowServerFocus>.fromOpaque(context).takeUnretainedValue()
+    if let data, length >= 8 {
+        memcpy(&spaceID, data, 8)
+    }
+    let stream = Unmanaged<WindowServerEvents>.fromOpaque(context).takeUnretainedValue()
     if Thread.isMainThread {
-        stream.handle(event: event, windowID: windowID)
+        stream.handle(event: event, windowID: windowID, spaceID: spaceID)
     } else {
-        DispatchQueue.main.async { stream.handle(event: event, windowID: windowID) }
+        DispatchQueue.main.async { stream.handle(event: event, windowID: windowID, spaceID: spaceID) }
     }
 }
 
-// Window focus events straight from the WindowServer's notification stream,
-// the signal AltTab migrated to after years of Accessibility-notification
-// bugs: the window server announces every real focus change regardless of
-// how busy the app is or how broken its AX tree may be. Delivery requires
-// opting the connection into per-window notifications, so the opted-in set
-// tracks window lifecycle via the create/destroy events on the same stream.
-final class WindowServerFocus {
+// Window focus and Space change events straight from the WindowServer's
+// notification stream, the signal AltTab migrated to after years of
+// Accessibility-notification bugs: the window server announces every real
+// focus change no matter how busy the app is or how broken its AX tree may
+// be, and announces Space changes the moment its bookkeeping flips instead
+// of whenever AppKit relays them. Window-event delivery requires opting the
+// connection into per-window notifications, so the opted-in set tracks
+// window lifecycle via the create/destroy events on the same stream; Space
+// events are connection-wide.
+final class WindowServerEvents {
     // WindowServer event ids (SkyLight, stable since macOS 10.10; the same
     // values AltTab and yabai use).
     private static let windowDestroyed: UInt32 = 804
     private static let windowFocused: UInt32 = 808
     private static let windowCreated: UInt32 = 811
+    private static let spaceCurrentChanged: UInt32 = 1329
+    private static let activeSpaceChanged: UInt32 = 1401
 
-    // Both fire on the main queue.
+    // All fire on the main queue. Space changes arrive as a burst per
+    // transition and can fire mid-animation; consumers must treat them as
+    // wake-up hints and re-read real state, never as arrival truth.
     var onFocused: ((Int) -> Void)?
     var onDestroyed: ((Int) -> Void)?
+    var onSpaceChanged: ((UInt64) -> Void)?
 
     private var optedIn: Set<UInt32> = []
     private var pushPending = false
 
     // Registers the notify procs and seeds the opt-in set. Returns false
     // when the SkyLight symbols are missing (a future macOS could remove
-    // them); recency then degrades to commit recording plus the z-order
-    // seed instead of breaking.
+    // them); consumers then run on their fallback signals instead of
+    // breaking.
     func start() -> Bool {
         guard let register = SLSRegisterConnectionNotifyProc,
               SLSRequestNotificationsForWindows != nil else {
-            Log.write("wsfocus: SkyLight notify symbols missing; focus events unavailable")
+            Log.write("wsevents: SkyLight notify symbols missing; falling back")
             return false
         }
         let cid = CGSMainConnectionID()
         let context = Unmanaged.passUnretained(self).toOpaque()
-        for event in [Self.windowFocused, Self.windowCreated, Self.windowDestroyed] {
+        for event in [Self.windowFocused, Self.windowCreated, Self.windowDestroyed,
+                      Self.spaceCurrentChanged, Self.activeSpaceChanged] {
             _ = register(cid, notifyProc, event, context)
         }
         // Seed with every real window on every Space: other-Space windows
@@ -89,11 +104,11 @@ final class WindowServerFocus {
             optedIn.insert(UInt32(window.id))
         }
         pushOptIns()
-        Log.write("wsfocus: stream active, \(optedIn.count) windows opted in")
+        Log.write("wsevents: stream active, \(optedIn.count) windows opted in")
         return true
     }
 
-    fileprivate func handle(event: UInt32, windowID: UInt32) {
+    fileprivate func handle(event: UInt32, windowID: UInt32, spaceID: UInt64) {
         switch event {
         case Self.windowFocused:
             onFocused?(Int(windowID))
@@ -106,6 +121,8 @@ final class WindowServerFocus {
                 schedulePushOptIns()
             }
             onDestroyed?(Int(windowID))
+        case Self.spaceCurrentChanged, Self.activeSpaceChanged:
+            onSpaceChanged?(spaceID)
         default:
             break
         }

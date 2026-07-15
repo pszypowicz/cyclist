@@ -25,11 +25,12 @@ final class WindowFocusTracker {
     // windowID -> monotonic focus sequence; higher = more recent.
     private var sequence: [Int: UInt64] = [:]
     private var counter: UInt64 = 0
-    private let stream = WindowServerFocus()
 
     private var storm: (pid: pid_t, windowIDs: Set<Int>, sawFocus: Bool, until: Date)?
 
-    init() {
+    // The stream is shared (SpaceNavigator consumes its Space events) and
+    // started by the owner once every consumer has wired its callbacks.
+    init(events: WindowServerEvents) {
         // Seed from the current-Space z-order (front-to-back) so ordering
         // is sane immediately after launch instead of degrading to AX
         // enumeration order until focus events accumulate.
@@ -40,13 +41,12 @@ final class WindowFocusTracker {
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didActivate(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
-        stream.onFocused = { [weak self] windowID in self?.handleFocus(windowID) }
+        events.onFocused = { [weak self] windowID in self?.handleFocus(windowID) }
         // Destroy events keep the map tight; the size cap in noteFocus
         // stays as a backstop for missed ones.
-        stream.onDestroyed = { [weak self] windowID in
+        events.onDestroyed = { [weak self] windowID in
             self?.sequence.removeValue(forKey: windowID)
         }
-        _ = stream.start()
     }
 
     // The single mutation point. Recording is idempotent per focus change,

@@ -10,7 +10,7 @@ final class SwitcherController {
     private let recency: WindowFocusTracker
     private let aerospace: AeroSpaceClient
     private let panel = SwitcherPanel()
-    private let navigator = SpaceNavigator()
+    private let navigator: SpaceNavigator
     private lazy var chain = ChainNavigator(navigator: navigator, aerospace: aerospace)
 
     private enum Session {
@@ -55,10 +55,11 @@ final class SwitcherController {
     private let leftArrowKey: Int64 = 123
     private let rightArrowKey: Int64 = 124
 
-    init(mru: MRUTracker, recency: WindowFocusTracker, aerospace: AeroSpaceClient) {
+    init(mru: MRUTracker, recency: WindowFocusTracker, aerospace: AeroSpaceClient, events: WindowServerEvents) {
         self.mru = mru
         self.recency = recency
         self.aerospace = aerospace
+        self.navigator = SpaceNavigator(events: events)
         tap.onKeyDown = { [weak self] event in
             self?.handleKeyDown(event) ?? false
         }

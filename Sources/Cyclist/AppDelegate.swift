@@ -3,6 +3,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = StatusItemController()
     private let aerospace = AeroSpaceClient()
+    private let wsEvents = WindowServerEvents()
     private var mru: MRUTracker!
     private var recency: WindowFocusTracker!
     private var controller: SwitcherController!
@@ -15,8 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             aerospace.start()
         }
         mru = MRUTracker()
-        recency = WindowFocusTracker()
-        controller = SwitcherController(mru: mru, recency: recency, aerospace: aerospace)
+        recency = WindowFocusTracker(events: wsEvents)
+        controller = SwitcherController(mru: mru, recency: recency, aerospace: aerospace, events: wsEvents)
+        // Start delivering only after every consumer has wired its callbacks.
+        _ = wsEvents.start()
         controller.onTapInvalidated = { [weak self] in self?.scheduleRecovery() }
         statusItem.setUp()
         statusItem.onAerospaceToggled = { [weak self] enabled in
