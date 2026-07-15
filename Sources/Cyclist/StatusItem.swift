@@ -7,6 +7,9 @@ final class StatusItemController: NSObject {
     // Flipping the AeroSpace toggle must start or stop the socket client,
     // not just rewrite the default, so it routes through the owner.
     var onAerospaceToggled: ((Bool) -> Void)?
+    // Side effects for toggles that need more than the UserDefaults write,
+    // keyed by the defaults key each menu item carries.
+    private var changeHandlers: [String: (Bool) -> Void] = [:]
 
     func setUp() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -21,10 +24,8 @@ final class StatusItemController: NSObject {
         menu.addItem(makeToggle(title: "Include minimized apps", key: Settings.includeMinimizedKey))
         menu.addItem(makeToggle(title: "Include apps in other Spaces", key: Settings.includeOtherSpacesKey))
         menu.addItem(makeToggle(title: "Include apps with no windows", key: Settings.includeNoWindowsKey))
-        let aerospaceItem = NSMenuItem(title: "AeroSpace integration", action: #selector(toggleAerospace(_:)), keyEquivalent: "")
-        aerospaceItem.target = self
-        aerospaceItem.state = Settings.aerospaceIntegration ? .on : .off
-        menu.addItem(aerospaceItem)
+        menu.addItem(makeToggle(title: "AeroSpace integration", key: Settings.aerospaceIntegrationKey,
+                                onChange: { [weak self] enabled in self?.onAerospaceToggled?(enabled) }))
         menu.addItem(.separator())
 
         let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
@@ -46,11 +47,14 @@ final class StatusItemController: NSObject {
         statusItem = item
     }
 
-    private func makeToggle(title: String, key: String) -> NSMenuItem {
+    private func makeToggle(title: String, key: String, onChange: ((Bool) -> Void)? = nil) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: #selector(toggle(_:)), keyEquivalent: "")
         item.target = self
         item.representedObject = key
         item.state = UserDefaults.standard.bool(forKey: key) ? .on : .off
+        if let onChange {
+            changeHandlers[key] = onChange
+        }
         return item
     }
 
@@ -59,13 +63,7 @@ final class StatusItemController: NSObject {
         let newValue = !UserDefaults.standard.bool(forKey: key)
         UserDefaults.standard.set(newValue, forKey: key)
         sender.state = newValue ? .on : .off
-    }
-
-    @objc private func toggleAerospace(_ sender: NSMenuItem) {
-        let newValue = !Settings.aerospaceIntegration
-        UserDefaults.standard.set(newValue, forKey: Settings.aerospaceIntegrationKey)
-        sender.state = newValue ? .on : .off
-        onAerospaceToggled?(newValue)
+        changeHandlers[key]?(newValue)
     }
 
     // Native login item via SMAppService: the app appears in System
