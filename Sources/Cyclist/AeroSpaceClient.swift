@@ -89,9 +89,7 @@ final class AeroSpaceClient {
                 }
             }
         }
-        if FileManager.default.fileExists(atPath: socketPath) {
-            connect(attempt: 1)
-        } else {
+        if !connectIfSocketPresent() {
             Log.write("aerospace: socket absent; waiting for launch")
         }
     }
@@ -178,9 +176,7 @@ final class AeroSpaceClient {
         lastKick = Date()
         switch state {
         case .absent:
-            if FileManager.default.fileExists(atPath: socketPath) {
-                connect(attempt: 1)
-            }
+            connectIfSocketPresent()
         case .disabled:
             cmd?.send(args: ["list-workspaces", "--focused"]) { [weak self] result in
                 if case .success(let answer) = result, answer.exitCode == 0 {
@@ -266,11 +262,16 @@ final class AeroSpaceClient {
         // A quit server leaves its socket file behind (it only unlinks on
         // startup), so a stat cannot distinguish quit from a transient drop;
         // one bounded retry cycle settles it either way.
-        if FileManager.default.fileExists(atPath: socketPath) {
-            connect(attempt: 1)
-        } else {
+        if !connectIfSocketPresent() {
             state = .absent
         }
+    }
+
+    @discardableResult
+    private func connectIfSocketPresent() -> Bool {
+        guard FileManager.default.fileExists(atPath: socketPath) else { return false }
+        connect(attempt: 1)
+        return true
     }
 
     private func tearDown() {

@@ -64,14 +64,14 @@ final class ChainNavigator {
         // Self-heal a stranded client (missed enable event, exhausted
         // reconnect); async and debounced, never affects this press.
         aerospace.kick()
-        guard let (ring, base) = resolveRing(display) else {
+        guard let (ring, baseIndex) = resolveRing(display) else {
             Log.write("chain: position not in ring; current \(display.current)"
                 + " pending \(navigator.pendingTarget.map(String.init) ?? "-")"
                 + " order \(display.order)")
             return
         }
-        guard let currentIndex = ring.firstIndex(of: base) else { return }
-        let targetIndex = currentIndex + (left ? -1 : 1)
+        let base = ring[baseIndex]
+        let targetIndex = baseIndex + (left ? -1 : 1)
         guard ring.indices.contains(targetIndex) else {
             Log.write("chain: at \(left ? "left" : "right") edge of \(ring.map(describe))")
             return
@@ -137,7 +137,7 @@ final class ChainNavigator {
 
     private typealias DisplayInfo = Spaces.DisplayInfo
 
-    private func resolveRing(_ display: DisplayInfo) -> ([RingElement], RingElement)? {
+    private func resolveRing(_ display: DisplayInfo) -> ([RingElement], Int)? {
         // A mid-refresh cache (focused workspace not in the list yet)
         // degrades this press to a pure native step rather than guessing.
         if let host = chooseHost(display), let resolved = ringAndBase(display, host: host) {
@@ -146,10 +146,10 @@ final class ChainNavigator {
         return ringAndBase(display, host: nil)
     }
 
-    private func ringAndBase(_ display: DisplayInfo, host: UInt64?) -> ([RingElement], RingElement)? {
+    private func ringAndBase(_ display: DisplayInfo, host: UInt64?) -> ([RingElement], Int)? {
         let ring = buildRing(display, host: host)
-        guard let base = baseElement(display, ring: ring, host: host) else { return nil }
-        return (ring, base)
+        guard let index = baseIndex(in: ring, display: display, host: host) else { return nil }
+        return (ring, index)
     }
 
     // The desktop Space whose place in the ring the workspaces take. With
@@ -174,33 +174,30 @@ final class ChainNavigator {
     }
 
     // Where this press steps from: the in-flight workspace switch, then
-    // the in-flight native hop, then the real current position.
-    private func baseElement(_ display: DisplayInfo, ring: [RingElement], host: UInt64?) -> RingElement? {
-        if let pending = pendingWorkspace, pending.expires > Date() {
-            let element = RingElement.workspace(pending.name, host: pending.host)
-            if ring.contains(element) { return element }
+    // the in-flight native hop, then the real current position. Returning
+    // the ring index directly keeps membership and position one lookup.
+    private func baseIndex(in ring: [RingElement], display: DisplayInfo, host: UInt64?) -> Int? {
+        if let pending = pendingWorkspace, pending.expires > Date(),
+           let index = ring.firstIndex(of: .workspace(pending.name, host: pending.host)) {
+            return index
         }
         if let inFlight = navigator.pendingTarget {
             if inFlight == host {
                 // The hop lands on the host desktop, which shows its
                 // focused workspace.
-                guard let focused = aerospace.focusedWorkspace,
-                      ring.contains(.workspace(focused, host: inFlight)) else { return nil }
-                return .workspace(focused, host: inFlight)
+                guard let focused = aerospace.focusedWorkspace else { return nil }
+                return ring.firstIndex(of: .workspace(focused, host: inFlight))
             }
             // An in-flight target missing from the order means the display
             // configuration moved under the navigation; stop rather than
             // base on stale state and hijack another display's Spaces.
-            guard ring.contains(.native(inFlight)) else { return nil }
-            return .native(inFlight)
+            return ring.firstIndex(of: .native(inFlight))
         }
         if display.current == host {
-            guard let focused = aerospace.focusedWorkspace,
-                  ring.contains(.workspace(focused, host: display.current)) else { return nil }
-            return .workspace(focused, host: display.current)
+            guard let focused = aerospace.focusedWorkspace else { return nil }
+            return ring.firstIndex(of: .workspace(focused, host: display.current))
         }
-        if ring.contains(.native(display.current)) { return .native(display.current) }
-        return nil
+        return ring.firstIndex(of: .native(display.current))
     }
 
     private func describe(_ element: RingElement) -> String {
