@@ -46,6 +46,28 @@ private let SLPSPostEventRecordTo =
 private let GetProcessForPIDFallback =
     resolve("GetProcessForPID", as: GetProcessForPIDFn.self)
 
+// One IPC returning a snapshot of the requested windows; the iterator
+// getters read that local snapshot without further round trips.
+private typealias SLSWindowQueryWindowsFn = @convention(c) (UInt32, CFArray, Int32) -> Unmanaged<CFTypeRef>?
+private typealias SLSWindowQueryResultCopyWindowsFn = @convention(c) (CFTypeRef) -> Unmanaged<CFTypeRef>?
+private typealias SLSWindowIteratorAdvanceFn = @convention(c) (CFTypeRef) -> Bool
+private typealias SLSWindowIteratorGetWindowIDFn = @convention(c) (CFTypeRef) -> UInt32
+private typealias SLSWindowIteratorGetAttributesFn = @convention(c) (CFTypeRef) -> UInt64
+private typealias SLSWindowIteratorGetTagsFn = @convention(c) (CFTypeRef) -> UInt64
+
+private let SLSWindowQueryWindows =
+    resolve("SLSWindowQueryWindows", as: SLSWindowQueryWindowsFn.self)
+private let SLSWindowQueryResultCopyWindows =
+    resolve("SLSWindowQueryResultCopyWindows", as: SLSWindowQueryResultCopyWindowsFn.self)
+private let SLSWindowIteratorAdvance =
+    resolve("SLSWindowIteratorAdvance", as: SLSWindowIteratorAdvanceFn.self)
+private let SLSWindowIteratorGetWindowID =
+    resolve("SLSWindowIteratorGetWindowID", as: SLSWindowIteratorGetWindowIDFn.self)
+private let SLSWindowIteratorGetAttributes =
+    resolve("SLSWindowIteratorGetAttributes", as: SLSWindowIteratorGetAttributesFn.self)
+private let SLSWindowIteratorGetTags =
+    resolve("SLSWindowIteratorGetTags", as: SLSWindowIteratorGetTagsFn.self)
+
 @_silgen_name("CGSCopyManagedDisplaySpaces")
 private func CGSCopyManagedDisplaySpaces(_ cid: UInt32) -> Unmanaged<CFArray>?
 
@@ -130,7 +152,41 @@ enum Spaces {
                 result[id] = windowIDs(inSpace: id)
             }
         }
-        return result
+        let real = realWindows(among: result.values.reduce(into: Set()) { $0.formUnion($1) })
+        return result.mapValues { $0.intersection(real) }
+    }
+
+    // A fullscreen Space carries companions besides the user's window: the
+    // slide-down toolbar (full display width at ~88pt, layer 0 - it passes
+    // every CGWindowList realness heuristic and used to produce a phantom
+    // second switcher row), backdrop and shield windows. The WindowServer's
+    // own records tell them apart: a window the user can hold carries tag
+    // bit 0x1 (or the 0x2 + 0x80000000 combination) alongside attribute
+    // bit 0x2 - the same predicate yabai filters with. One batched query
+    // covers all candidates; missing symbols keep the unfiltered set.
+    private static func realWindows(among windowIDs: Set<Int>) -> Set<Int> {
+        guard !windowIDs.isEmpty,
+              let queryWindows = SLSWindowQueryWindows,
+              let copyResult = SLSWindowQueryResultCopyWindows,
+              let advance = SLSWindowIteratorAdvance,
+              let getWindowID = SLSWindowIteratorGetWindowID,
+              let getAttributes = SLSWindowIteratorGetAttributes,
+              let getTags = SLSWindowIteratorGetTags,
+              let query = queryWindows(CGSMainConnectionID(),
+                                       windowIDs.map { UInt32($0) } as CFArray,
+                                       Int32(windowIDs.count))?.takeRetainedValue(),
+              let iterator = copyResult(query)?.takeRetainedValue() else {
+            return windowIDs
+        }
+        var real: Set<Int> = []
+        while advance(iterator) {
+            let attributes = getAttributes(iterator)
+            let tags = getTags(iterator)
+            guard attributes & 0x2 != 0 || tags & 0x0400_0000_0000_0000 != 0 else { continue }
+            guard tags & 0x1 != 0 || (tags & 0x2 != 0 && tags & 0x8000_0000 != 0) else { continue }
+            real.insert(Int(getWindowID(iterator)))
+        }
+        return real
     }
 
     // Make a specific window key through the WindowServer: front the process
