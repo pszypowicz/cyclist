@@ -344,12 +344,26 @@ final class SwitcherController {
         return (index + (backward ? count - 1 : 1)) % count
     }
 
+    // Finder ignores a normal quit and relaunches itself, so quitting it
+    // would silently drop the row without terminating anything. Gate it on
+    // the same opt-in the Dock and AltTab honor:
+    //   defaults write com.apple.finder QuitMenuItem -bool true
+    private func canQuit(_ app: NSRunningApplication) -> Bool {
+        guard app.bundleIdentifier == "com.apple.finder" else { return true }
+        return UserDefaults(suiteName: "com.apple.finder")?.bool(forKey: "QuitMenuItem") ?? false
+    }
+
     // Quit the selected row's app, like native Cmd+Tab's Q: its rows leave
     // the list and the session continues on whatever remains.
     private func quitSelected() {
         switch session {
         case .apps(let items, let index):
             let app = items[index].app
+            guard canQuit(app) else {
+                Log.write("quit: \(items[index].appName) is not quittable")
+                NSSound.beep()
+                return
+            }
             Log.write("quit: app=\(items[index].appName) pid=\(app.processIdentifier)")
             app.terminate()
             let survivors = items.enumerated().filter {
@@ -358,6 +372,11 @@ final class SwitcherController {
             applyAppsSession(survivors.map(\.element),
                              selectedNear: survivors.filter { $0.offset < index }.count)
         case .windows(let app, _, _):
+            guard canQuit(app) else {
+                Log.write("quit: \(app.localizedName ?? "?") is not quittable")
+                NSSound.beep()
+                return
+            }
             // Every row belongs to the quit app; nothing left to browse.
             Log.write("quit: app=\(app.localizedName ?? "?") pid=\(app.processIdentifier)")
             app.terminate()
