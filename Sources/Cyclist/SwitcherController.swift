@@ -129,11 +129,16 @@ final class SwitcherController {
         let backward = flags.contains(.maskShift)
 
         let shortcuts = ShortcutSettings.shared
+        // Disabled bindings pass through, so the native behavior is back
+        // the moment the toggle flips - same per-matched-press defaults
+        // read as the Space bindings below.
         if shortcuts.switcher.matches(keyCode: keyCode, flags: flags) {
+            guard Settings.appSwitcher else { return .passed }
             advanceApps(backward: backward)
             return .consumed
         }
         if shortcuts.cycleWindows.matches(keyCode: keyCode, flags: flags) {
+            guard Settings.windowCycler else { return .passed }
             advanceWindows(backward: backward)
             return .consumed
         }

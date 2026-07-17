@@ -38,6 +38,8 @@ private struct InfoDot: View {
 }
 
 struct SettingsView: View {
+    @AppStorage(Settings.appSwitcherKey) private var appSwitcher = true
+    @AppStorage(Settings.windowCyclerKey) private var windowCycler = true
     @AppStorage(Settings.includeHiddenKey) private var includeHidden = true
     @AppStorage(Settings.includeMinimizedKey) private var includeMinimized = true
     @AppStorage(Settings.includeOtherSpacesKey) private var includeOtherSpaces = true
@@ -60,6 +62,7 @@ struct SettingsView: View {
         HStack(alignment: .top, spacing: 0) {
             Form {
                 generalSection
+                switchingSection
                 switcherListSection
                 navigationSection
             }
@@ -122,6 +125,23 @@ struct SettingsView: View {
         }
     }
 
+    private var switchingSection: some View {
+        Section("Switching") {
+            Toggle(isOn: $appSwitcher) {
+                HStack(spacing: 4) {
+                    Text("App switcher")
+                    InfoDot("Replaces the switcher binding (Cmd+Tab by default) with Cyclist's list. Off returns the binding to macOS immediately, leaving Space navigation as Cyclist's job.")
+                }
+            }
+            Toggle(isOn: $windowCycler) {
+                HStack(spacing: 4) {
+                    Text("Window cycler")
+                    InfoDot("Cycles the frontmost app's windows on the cycle binding (Cmd+` by default). Off returns the binding to macOS immediately.")
+                }
+            }
+        }
+    }
+
     private var switcherListSection: some View {
         Section("Switcher list") {
                 Toggle("Include hidden apps", isOn: $includeHidden)
@@ -134,6 +154,7 @@ struct SettingsView: View {
                     }
                 }
         }
+        .disabled(!appSwitcher)
     }
 
     private var navigationSection: some View {
