@@ -15,12 +15,15 @@ import AppKit
 // left on the first - spatially consistent in both directions. Workspace
 // steps are a socket command instead of a swipe; crossing from a
 // fullscreen Space to a workspace is a native hop to the host desktop
-// with the workspace switch chained onto the verified arrival. When the
-// client is inactive the ring, base, and arrival behavior are exactly the
-// native code path.
+// with the workspace switch chained onto the verified arrival. Workspaces
+// whose windows all went native-fullscreen are hollow (visiting one shows
+// a bare desktop) and lose their ring stop unless a setting keeps them.
+// When the client is inactive the ring, base, and arrival behavior are
+// exactly the native code path.
 final class ChainNavigator {
     private let navigator: SpaceNavigator
     private let aerospace: AeroSpaceClient
+    private let recency: WindowFocusTracker
 
     private enum RingElement: Equatable {
         case native(UInt64)
@@ -43,9 +46,10 @@ final class ChainNavigator {
     // (stale) focused workspace.
     private var pendingWorkspace: (name: String, host: UInt64, expires: Date)?
 
-    init(navigator: SpaceNavigator, aerospace: AeroSpaceClient) {
+    init(navigator: SpaceNavigator, aerospace: AeroSpaceClient, recency: WindowFocusTracker) {
         self.navigator = navigator
         self.aerospace = aerospace
+        self.recency = recency
     }
 
     // Callers that cancel the underlying SpaceNavigator (a switcher
@@ -83,7 +87,7 @@ final class ChainNavigator {
             pendingWorkspace = nil
             Log.write("chain: \(direction) \(describe(base)) -> space \(id)")
             let arrival: (() -> Void)? = display.types[id] == 0
-                ? { Self.focusTopUserWindow() }
+                ? { [weak self] in self?.focusTopUserWindow() }
                 : nil
             _ = navigator.begin(to: id, onArrival: arrival)
 
@@ -123,7 +127,7 @@ final class ChainNavigator {
                     if !ok {
                         // Keep the fullscreen-exit guarantee of landing on
                         // something concrete even if the client just died.
-                        Self.focusTopUserWindow()
+                        self.focusTopUserWindow()
                     }
                 }
             })
@@ -167,10 +171,53 @@ final class ChainNavigator {
 
     private func buildRing(_ display: DisplayInfo, host: UInt64?) -> [RingElement] {
         guard let host else { return display.order.map { .native($0) } }
+        let names = ringWorkspaces(display, host: host)
         return display.order.flatMap { id -> [RingElement] in
             guard id == host else { return [.native(id)] }
-            return aerospace.workspaces.map { .workspace($0, host: host) }
+            return names.map { .workspace($0, host: host) }
         }
+    }
+
+    // The workspaces that earn a ring stop. A workspace is hollow when
+    // every window AeroSpace assigns it resides on a fullscreen Space:
+    // visiting one shows a bare desktop - the windows display elsewhere,
+    // and AeroSpace keeps them assigned only so they return on fullscreen
+    // exit - so the chain skips it and the fullscreen Space itself is the
+    // stop that shows something. The focused workspace keeps its stop only
+    // while the desktop is (or is about to be) the position a press steps
+    // from - there it is the base and dropping it would break base
+    // resolution. Standing on a fullscreen Space, AeroSpace attributes
+    // focus to the workspace of the fullscreen window itself, and keeping
+    // that stop would resurrect exactly the hollow stop being skipped.
+    // When filtering would drop every workspace, all stay - the desktop
+    // must remain reachable from a fullscreen Space.
+    private func ringWorkspaces(_ display: DisplayInfo, host: UInt64) -> [String] {
+        let all = aerospace.workspaces
+        if Config.showHollowWorkspaces { return all }
+        var fullscreenResidents: Set<Int> = []
+        for id in display.order where display.types[id] != 0 {
+            fullscreenResidents.formUnion(Spaces.windowIDs(inSpace: id))
+        }
+        let baseWorkspace = display.current == host || navigator.pendingTarget == host
+            ? aerospace.focusedWorkspace : nil
+        let kept = all.filter { name in
+            name == baseWorkspace || !isHollow(name, fullscreenResidents: fullscreenResidents)
+        }
+        if kept.count != all.count {
+            Log.debug("chain: hollow workspaces skipped: \(all.filter { !kept.contains($0) })")
+        }
+        return kept.isEmpty ? all : kept
+    }
+
+    // The client's workspace list is filtered to occupied-or-focused, so a
+    // windowless workspace only shows up here in a refresh race; treating
+    // it as hollow errs toward the fresher truth. The failure bias runs the
+    // other way for residents: an SLS hiccup that returns no fullscreen
+    // windows keeps every workspace visible rather than dropping stops.
+    private func isHollow(_ name: String, fullscreenResidents: Set<Int>) -> Bool {
+        let windows = aerospace.windowIDs(inWorkspace: name)
+        guard !windows.isEmpty else { return true }
+        return windows.allSatisfy(fullscreenResidents.contains)
     }
 
     // Where this press steps from: the in-flight workspace switch, then
@@ -214,7 +261,7 @@ final class ChainNavigator {
     // the same global top-left-origin coordinates); it also excludes
     // AeroSpace's hidden-workspace windows, parked so far into the corner
     // that their centers leave the display.
-    private static func focusTopUserWindow() {
+    private func focusTopUserWindow() {
         let displayBounds = Spaces.activeDisplayID().map(CGDisplayBounds)
         guard let window = CGWindows.real([.optionOnScreenOnly]).first(where: { window in
             guard NSRunningApplication(processIdentifier: window.pid)?.activationPolicy == .regular
@@ -223,6 +270,12 @@ final class ChainNavigator {
             return displayBounds.contains(CGPoint(x: window.bounds.midX, y: window.bounds.midY))
         }) else { return }
         Log.write("chain: focus top window \(window.id) pid \(window.pid)")
+        // Ranked explicitly: the makeKey's own focus event lands inside
+        // the navigation suppression window and would go unrecorded.
+        recency.noteFocus(windowID: window.id, source: "chain")
         Spaces.makeKey(pid: window.pid, windowID: window.id)
+        // Arriving on a desktop can leave the top window's backing purged
+        // (blank screen, healthy bookkeeping); a geometry nudge repaints it.
+        AX.repaintNudge(pid: window.pid, windowID: window.id)
     }
 }

@@ -11,9 +11,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Settings.registerDefaults()
+        Config.load()
         AX.configureGlobalTimeout()
-        if Settings.aerospaceIntegration {
+        if Config.aerospaceIntegration {
             aerospace.start()
+        }
+        Config.startWatching { [weak self] old, new in
+            guard let self else { return }
+            if old.aerospaceIntegration != new.aerospaceIntegration {
+                if new.aerospaceIntegration {
+                    self.aerospace.start()
+                } else {
+                    self.aerospace.stop()
+                }
+            }
         }
         mru = MRUTracker()
         recency = WindowFocusTracker(events: wsEvents)
@@ -22,15 +33,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wsEvents.start()
         controller.onTapInvalidated = { [weak self] in self?.scheduleRecovery() }
         statusItem.setUp()
-        statusItem.onAerospaceToggled = { [weak self] enabled in
+        // Disabled means the taps are down and every shortcut is native
+        // again; the trackers and the AeroSpace client keep running so a
+        // re-enable resumes with fresh MRU order.
+        statusItem.onEnabledToggled = { [weak self] enabled in
             guard let self else { return }
             if enabled {
-                self.aerospace.start()
+                Log.write("enabled via menu")
+                self.ensurePermissionAndStart()
             } else {
-                self.aerospace.stop()
+                Log.write("disabled via menu; native behavior until re-enabled")
+                self.permissionTimer?.invalidate()
+                self.permissionTimer = nil
+                self.controller.stop()
             }
         }
-        ensurePermissionAndStart()
+        if Settings.enabled {
+            ensurePermissionAndStart()
+        } else {
+            Log.write("startup: disabled by setting; hooks not installed")
+        }
         // Optional: unlocks live titles for windows in other Spaces via
         // CGWindowList. Used solely to read titles; Cyclist never captures
         // window contents. Without it, last-seen titles are used instead.

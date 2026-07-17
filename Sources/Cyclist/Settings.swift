@@ -5,7 +5,8 @@ enum Settings {
     static let includeMinimizedKey = "includeMinimized"
     static let includeOtherSpacesKey = "includeOtherSpaces"
     static let includeNoWindowsKey = "includeNoWindows"
-    static let aerospaceIntegrationKey = "aerospaceIntegration"
+    static let trackpadSwipeKey = "trackpadSwipe"
+    static let enabledKey = "enabled"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -13,7 +14,8 @@ enum Settings {
             includeMinimizedKey: true,
             includeOtherSpacesKey: true,
             includeNoWindowsKey: false,
-            aerospaceIntegrationKey: true,
+            trackpadSwipeKey: true,
+            enabledKey: true,
         ])
     }
 
@@ -33,7 +35,11 @@ enum Settings {
         UserDefaults.standard.bool(forKey: includeNoWindowsKey)
     }
 
-    static var aerospaceIntegration: Bool {
-        UserDefaults.standard.bool(forKey: aerospaceIntegrationKey)
+    static var trackpadSwipe: Bool {
+        UserDefaults.standard.bool(forKey: trackpadSwipeKey)
+    }
+
+    static var enabled: Bool {
+        UserDefaults.standard.bool(forKey: enabledKey)
     }
 }

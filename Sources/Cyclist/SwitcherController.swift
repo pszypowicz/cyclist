@@ -11,7 +11,8 @@ final class SwitcherController {
     private let aerospace: AeroSpaceClient
     private let panel = SwitcherPanel()
     private let navigator: SpaceNavigator
-    private lazy var chain = ChainNavigator(navigator: navigator, aerospace: aerospace)
+    private let swipes = DockSwipeRecognizer()
+    private lazy var chain = ChainNavigator(navigator: navigator, aerospace: aerospace, recency: recency)
 
     private enum Session {
         // Snapshot still building off the tap callback. `presses` records
@@ -65,12 +66,24 @@ final class SwitcherController {
         self.mru = mru
         self.recency = recency
         self.aerospace = aerospace
-        self.navigator = SpaceNavigator(events: events)
+        self.navigator = SpaceNavigator(events: events, recency: recency)
         tap.onKeyDown = { [weak self] event in
             self?.handleKeyDown(event) ?? false
         }
         tap.onFlagsChanged = { [weak self] event in
             self?.handleFlagsChanged(event)
+        }
+        // The toggle is read per event so flipping it in the menu applies
+        // immediately; when off, real swipes pass through to the Dock and
+        // native behavior is back without a restart.
+        tap.onGesture = { [weak self] event in
+            guard Settings.trackpadSwipe else { return false }
+            return self?.swipes.handle(event) ?? false
+        }
+        swipes.onSwipe = { [weak self] left in
+            // Space navigation, handled off the tap callback so nothing can
+            // stall event delivery (same as Ctrl+Arrows).
+            DispatchQueue.main.async { self?.chain.navigate(left: left) }
         }
         tap.onInvalidated = { [weak self] in
             self?.onTapInvalidated?()
@@ -79,6 +92,18 @@ final class SwitcherController {
 
     func start() -> Bool {
         tap.start()
+    }
+
+    // Tears down the event taps (the menu's Enabled switch turned off):
+    // every hook releases and the native shortcuts work again immediately.
+    // The owner keeps the trackers and the AeroSpace client running, so a
+    // later start() resumes with fresh MRU order; only in-flight UI and
+    // navigation are dropped here.
+    func stop() {
+        cancel()
+        navigator.cancel()
+        chain.cancelPending()
+        tap.stop()
     }
 
     private func handleKeyDown(_ event: CGEvent) -> Bool {
@@ -312,12 +337,16 @@ final class SwitcherController {
     // topmost on-screen real window), not from the focus-event stream:
     // event-derived "current" goes stale in the gap between a focus
     // change and its notifications, and a stale exclusion makes the tap
-    // re-commit the very window the user is on (observed after entering
-    // a fullscreen Space). Rows without ranks fall back to the
-    // previous-app heuristic.
+    // re-commit the very window the user is on. The realness filter matters
+    // on a fullscreen Space: its slide-down toolbar is a layer-0 ~88pt
+    // window that tops the plain CGWindowList, so without the filter the
+    // strip - not the content window - reads as current, the content window
+    // is never excluded, and a quick tap re-commits the fullscreen app to
+    // itself instead of the previous window. Rows without ranks fall back to
+    // the previous-app heuristic.
     private func initialAppsIndex(items: [ListEntry], backward: Bool) -> Int {
         if backward { return items.count - 1 }
-        let current = CGWindows.real([.optionOnScreenOnly]).first?.id
+        let current = Spaces.topOnScreenRealWindow()
         var best: (index: Int, rank: UInt64)?
         for (index, item) in items.enumerated() {
             guard let windowID = item.windowID, windowID != current else { continue }
@@ -569,6 +598,9 @@ final class SwitcherController {
         if let spaceID, let windowID,
            navigator.begin(to: spaceID, onArrival: { [weak self] in
                self?.focusWindow(app: app, element: element, windowID: windowID)
+               // A window reached in another Space can arrive with a purged
+               // backing (blank though focused); a geometry nudge repaints it.
+               AX.repaintNudge(pid: app.processIdentifier, windowID: windowID)
            }) {
             Log.write("navigate: pid=\(app.processIdentifier) space=\(spaceID)")
             return

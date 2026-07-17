@@ -13,6 +13,17 @@ struct CGWindowInfoLite {
 }
 
 enum CGWindows {
+    // The realness predicate, shared by list snapshots and the focus
+    // event-stream filter: layer 0, visible alpha, plausibly user-sized.
+    private static func isReal(_ info: [String: Any]) -> Bool {
+        guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+              let alpha = info[kCGWindowAlpha as String] as? Double, alpha > 0,
+              let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+              let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
+              bounds.width >= 100, bounds.height >= 80 else { return false }
+        return true
+    }
+
     // Front-to-back for .optionOnScreenOnly, unspecified otherwise.
     static func real(_ options: CGWindowListOption) -> [CGWindowInfoLite] {
         guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
@@ -20,13 +31,11 @@ enum CGWindows {
         }
         var result: [CGWindowInfoLite] = []
         for info in list {
-            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
-                  let alpha = info[kCGWindowAlpha as String] as? Double, alpha > 0,
-                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
-                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
-                  bounds.width >= 100, bounds.height >= 80,
+            guard isReal(info),
                   let windowID = info[kCGWindowNumber as String] as? Int,
-                  let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
+                  let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else { continue }
             let name = info[kCGWindowName as String] as? String
             result.append(CGWindowInfoLite(
                 id: windowID,
@@ -38,10 +47,13 @@ enum CGWindows {
         return result
     }
 
-    // Single-window owner lookup; nil when the window is already gone.
-    static func owner(of windowID: Int) -> pid_t? {
-        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(windowID))
-            as? [[String: Any]]
-        return list?.first?[kCGWindowOwnerPID as String] as? pid_t
+    // Owner pid plus the realness verdict for one window in a single
+    // round trip - what the focus/creation event stream filters with.
+    // nil when the window is already gone.
+    static func realOwner(of windowID: Int) -> (pid: pid_t, isReal: Bool)? {
+        guard let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(windowID))
+                as? [[String: Any]])?.first,
+              let pid = info[kCGWindowOwnerPID as String] as? pid_t else { return nil }
+        return (pid, isReal(info))
     }
 }

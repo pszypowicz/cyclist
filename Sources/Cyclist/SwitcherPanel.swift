@@ -62,6 +62,7 @@ struct SwitcherView: View {
 final class SwitcherPanel {
     private var panel: NSPanel
     private let model = SwitcherViewModel()
+    private var lastOrderedFront = Date.distantPast
 
     // Must mirror the SwitcherView layout: row content plus its vertical
     // padding, the VStack spacing between rows, and the VStack padding.
@@ -105,6 +106,9 @@ final class SwitcherPanel {
             defer: true
         )
         panel.level = .popUpMenu
+        // Replaced panels are close()d so NSApp releases them; the default
+        // release-when-closed would double-release under ARC.
+        panel.isReleasedWhenClosed = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -133,10 +137,40 @@ final class SwitcherPanel {
         show()
     }
 
+    // The WindowServer can silently refuse to bring an existing panel
+    // back: re-ordering a window front after an orderOut can stop
+    // arriving on screen entirely while AppKit still reports it visible
+    // (observed on macOS 26 after a fullscreen Space was destroyed; once
+    // in that state it recurs on every re-show). A freshly created
+    // window's first ordering reliably arrives, so every show that is
+    // not already on screen starts from a fresh window - creation is a
+    // few milliseconds, invisible next to the panel's own show delay.
     func show() {
-        guard !panel.isVisible else { return }
+        if panel.isVisible {
+            if isOnScreen() { return }
+            // Freshly ordered and still registering with the server (the
+            // first render must commit before the window counts as on
+            // screen); replacing it now would just reset that clock.
+            if Date().timeIntervalSince(lastOrderedFront) < 1.0 { return }
+            Log.write("panel: visible but not on screen, rebuilding")
+        }
+        let old = panel
+        old.orderOut(nil)
+        old.close()
+        panel = Self.makePanel(model: model)
         layout()
         panel.orderFrontRegardless()
+        lastOrderedFront = Date()
+    }
+
+    // The WindowServer's own record of the panel; AppKit's isVisible can
+    // keep reporting true for a window the server no longer shows.
+    private func isOnScreen() -> Bool {
+        guard panel.windowNumber > 0,
+              let info = CGWindowListCreateDescriptionFromArray(
+                  [NSNumber(value: panel.windowNumber)] as CFArray) as? [[String: Any]],
+              let record = info.first else { return false }
+        return record[kCGWindowIsOnscreen as String] as? Bool ?? false
     }
 
     func hide() {

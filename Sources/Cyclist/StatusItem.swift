@@ -4,9 +4,8 @@ import ServiceManagement
 final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
 
-    // Flipping the AeroSpace toggle must start or stop the socket client,
-    // not just rewrite the default, so it routes through the owner.
-    var onAerospaceToggled: ((Bool) -> Void)?
+    // Flipping Enabled must install or tear down the event taps.
+    var onEnabledToggled: ((Bool) -> Void)?
     // Side effects for toggles that need more than the UserDefaults write,
     // keyed by the defaults key each menu item carries.
     private var changeHandlers: [String: (Bool) -> Void] = [:]
@@ -17,15 +16,22 @@ final class StatusItemController: NSObject {
             systemSymbolName: "arrow.triangle.2.circlepath",
             accessibilityDescription: "Cyclist"
         )
+        // The dimmed template rendering is the disabled-state visual.
+        item.button?.appearsDisabled = !Settings.enabled
 
         let menu = NSMenu()
         menu.autoenablesItems = false
+        menu.addItem(makeToggle(title: "Enabled", key: Settings.enabledKey,
+                                onChange: { [weak self] enabled in
+                                    self?.statusItem?.button?.appearsDisabled = !enabled
+                                    self?.onEnabledToggled?(enabled)
+                                }))
+        menu.addItem(.separator())
         menu.addItem(makeToggle(title: "Include hidden apps", key: Settings.includeHiddenKey))
         menu.addItem(makeToggle(title: "Include minimized apps", key: Settings.includeMinimizedKey))
         menu.addItem(makeToggle(title: "Include apps in other Spaces", key: Settings.includeOtherSpacesKey))
         menu.addItem(makeToggle(title: "Include apps with no windows", key: Settings.includeNoWindowsKey))
-        menu.addItem(makeToggle(title: "AeroSpace integration", key: Settings.aerospaceIntegrationKey,
-                                onChange: { [weak self] enabled in self?.onAerospaceToggled?(enabled) }))
+        menu.addItem(makeToggle(title: "Trackpad swipe navigation", key: Settings.trackpadSwipeKey))
         menu.addItem(.separator())
 
         let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
