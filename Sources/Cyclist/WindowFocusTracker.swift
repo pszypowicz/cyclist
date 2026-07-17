@@ -116,6 +116,17 @@ final class WindowFocusTracker {
         sequence
     }
 
+    // True while a self-driven Space transition is in flight or its raise
+    // noise is still settling. The WindowServer z-order lags compositing
+    // in that window; the ranks do not - commits record their target at
+    // intent time and the suppression above keeps transition noise out.
+    var navigationSettling: Bool { suppressing }
+
+    // The window the ranks say holds focus - the last one recorded.
+    func topRankedWindowID() -> Int? {
+        sequence.max { $0.value < $1.value }?.key
+    }
+
     // Called from the switcher right before it activates an app, so the
     // raise-storm snapshot is in place even when the storm beats the
     // activation notification.

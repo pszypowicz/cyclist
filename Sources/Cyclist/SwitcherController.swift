@@ -396,7 +396,19 @@ final class SwitcherController {
     // the previous-app heuristic.
     private func initialAppsIndex(items: [ListEntry], backward: Bool) -> Int {
         if backward { return items.count - 1 }
-        let current = Spaces.topOnScreenRealWindow()
+        // While our own Space navigation settles, the z-order lags
+        // compositing: the window just left can still read as top-on-screen,
+        // which excludes the true bounce target (the tap veers to a third
+        // window and drops the fullscreen partner from the rotation) or
+        // fails to exclude the true current one (the tap re-commits it).
+        // The ranks have neither problem there - commits record their
+        // target at intent time and transition raise noise is suppressed -
+        // so the top rank IS the current window. Outside a settle window
+        // the z-order stays authoritative: a mouse-clicked focus is current
+        // in the z-order immediately but unranked until its event arrives.
+        let current = recency.navigationSettling
+            ? recency.topRankedWindowID()
+            : Spaces.topOnScreenRealWindow()
         var best: (index: Int, rank: UInt64)?
         for (index, item) in items.enumerated() {
             guard let windowID = item.windowID, windowID != current else { continue }
