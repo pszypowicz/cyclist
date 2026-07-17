@@ -3,7 +3,20 @@ import AppKit
 final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
 
-    func setUp() {
+    // Creates or removes the status item to match the setting; the owner
+    // calls it at launch and from its defaults observation, so hiding or
+    // showing the icon applies live. Idempotent.
+    func refresh() {
+        if Settings.showMenuBarIcon {
+            guard statusItem == nil else { return }
+            statusItem = makeItem()
+        } else if let item = statusItem {
+            NSStatusBar.system.removeStatusItem(item)
+            statusItem = nil
+        }
+    }
+
+    private func makeItem() -> NSStatusItem {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(
             systemSymbolName: "arrow.triangle.2.circlepath",
@@ -29,7 +42,7 @@ final class StatusItemController: NSObject {
         menu.addItem(quitItem)
 
         item.menu = menu
-        statusItem = item
+        return item
     }
 
     @objc private func showSettings() {

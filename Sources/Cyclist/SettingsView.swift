@@ -45,6 +45,7 @@ struct SettingsView: View {
     @AppStorage(Settings.includeNoWindowsKey) private var includeNoWindows = false
     @AppStorage(Settings.trackpadSwipeKey) private var trackpadSwipe = true
     @AppStorage(Settings.keyboardSpaceNavKey) private var keyboardSpaceNav = true
+    @AppStorage(Settings.showMenuBarIconKey) private var showMenuBarIcon = true
     @AppStorage(Settings.aerospaceIntegrationKey) private var aerospaceIntegration = false
     @AppStorage(Settings.showHollowWorkspacesKey) private var showHollowWorkspaces = false
     @AppStorage(Settings.switcherShortcutKey) private var switcherShortcut = "cmd+tab"
@@ -107,10 +108,19 @@ struct SettingsView: View {
                 Label("Launch at Login", systemImage: "power")
             }
             .onChange(of: launchAtLogin) { setLaunchAtLogin($0) }
+            Toggle(isOn: $showMenuBarIcon) {
+                HStack(spacing: 4) {
+                    Text("Show menu bar icon")
+                    InfoDot("Cyclist keeps running without the icon. To get back here: hold the switcher open and press comma, or relaunch Cyclist - reopening the app always shows this window.")
+                }
+            }
+            Button("Quit Cyclist") {
+                NSApp.terminate(nil)
+            }
         } header: {
             Text("General")
         } footer: {
-            Text("A macOS login item; also listed in System Settings > General > Login Items.")
+            Text("Launch at Login is a macOS login item; also listed in System Settings > General > Login Items.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
