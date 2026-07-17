@@ -16,13 +16,14 @@ struct CGWindowInfoLite {
 enum CGWindows {
     // The realness predicate, shared by list snapshots and the focus
     // event-stream filter: layer 0, visible alpha, plausibly user-sized.
-    private static func isReal(_ info: [String: Any]) -> Bool {
+    // Returns the parsed bounds so list building decodes them only once.
+    private static func realBounds(_ info: [String: Any]) -> CGRect? {
         guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
               let alpha = info[kCGWindowAlpha as String] as? Double, alpha > 0,
               let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
               let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
-              bounds.width >= 100, bounds.height >= 80 else { return false }
-        return true
+              bounds.width >= 100, bounds.height >= 80 else { return nil }
+        return bounds
     }
 
     // Front-to-back for .optionOnScreenOnly, unspecified otherwise.
@@ -32,11 +33,9 @@ enum CGWindows {
         }
         var result: [CGWindowInfoLite] = []
         for info in list {
-            guard isReal(info),
+            guard let bounds = realBounds(info),
                   let windowID = info[kCGWindowNumber as String] as? Int,
-                  let pid = info[kCGWindowOwnerPID as String] as? pid_t,
-                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
-                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else { continue }
+                  let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
             let name = info[kCGWindowName as String] as? String
             result.append(CGWindowInfoLite(
                 id: windowID,
@@ -55,6 +54,6 @@ enum CGWindows {
         guard let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(windowID))
                 as? [[String: Any]])?.first,
               let pid = info[kCGWindowOwnerPID as String] as? pid_t else { return nil }
-        return (pid, isReal(info))
+        return (pid, realBounds(info) != nil)
     }
 }

@@ -114,16 +114,21 @@ final class SwitcherController {
             advanceWindows(backward: backward)
             return true
         }
-        // Match before consulting the toggle: this branch runs for every
-        // keystroke system-wide, and the UserDefaults read belongs on the
-        // rare matched path, not the reject path.
-        let previousSpace = shortcuts.previousSpace.matches(keyCode: keyCode, flags: flags)
-        if previousSpace || shortcuts.nextSpace.matches(keyCode: keyCode, flags: flags),
-           Settings.keyboardSpaceNav {
-            // Space navigation, handled off the tap callback so nothing can
-            // stall event delivery.
-            DispatchQueue.main.async { [weak self] in self?.chain.navigate(left: previousSpace) }
-            return true
+        // Space navigation never applies inside an open session - the
+        // session keys below must win there even when a Space binding
+        // shares a combo with one of them (e.g. cmd+j). Match before
+        // consulting the toggle: this branch runs for every keystroke
+        // system-wide, and the UserDefaults read belongs on the rare
+        // matched path, not the reject path.
+        if session == nil {
+            let previousSpace = shortcuts.previousSpace.matches(keyCode: keyCode, flags: flags)
+            if previousSpace || shortcuts.nextSpace.matches(keyCode: keyCode, flags: flags),
+               Settings.keyboardSpaceNav {
+                // Space navigation, handled off the tap callback so nothing
+                // can stall event delivery.
+                DispatchQueue.main.async { [weak self] in self?.chain.navigate(left: previousSpace) }
+                return true
+            }
         }
 
         switch keyCode {
@@ -215,16 +220,26 @@ final class SwitcherController {
             // session; the sweep reads whatever is captured at its start.
             aerospace.refresh()
             aerospace.kick()
-            SnapshotQueue.shared.async { [weak self] in
-                guard let self else { return }
-                let inputs = DispatchQueue.main.sync {
-                    SnapshotInputs.capture(mru: self.mru, recency: self.recency, aerospace: self.aerospace)
-                }
+            runSweep(includeApps: true) { inputs in
                 let entries = AppListProvider.snapshot(inputs: inputs)
-                DispatchQueue.main.async {
-                    self.finishAppsSnapshot(entries, generation: generation)
-                }
+                return { [weak self] in self?.finishAppsSnapshot(entries, generation: generation) }
             }
+        }
+    }
+
+    // The capture-sweep-finish spine both snapshot kinds share: inputs are
+    // captured on main at sweep start (see SnapshotInputs), the sweep runs
+    // on the serial snapshot queue, and the continuation it returns lands
+    // back on main.
+    private func runSweep(includeApps: Bool,
+                          sweep: @escaping (SnapshotInputs) -> () -> Void) {
+        SnapshotQueue.shared.async { [weak self] in
+            guard let self else { return }
+            let inputs = DispatchQueue.main.sync {
+                SnapshotInputs.capture(mru: self.mru, recency: self.recency,
+                                       aerospace: self.aerospace, includeApps: includeApps)
+            }
+            DispatchQueue.main.async(execute: sweep(inputs))
         }
     }
 
@@ -248,128 +263,150 @@ final class SwitcherController {
         }
     }
 
-    private func finishAppsSnapshot(_ items: [ListEntry], generation: Int) {
+    // Shared spine of both snapshot finishes: remember the sweep's
+    // elements, replay a parked quick-tap commit unless a newer
+    // generation already applied, or resolve the live pending session.
+    // `pendingSession` extracts the matching pending case's presses and
+    // context (the windows session's target app); mismatched cases fall
+    // through the generation guards untouched.
+    private func finishSnapshot<Item, Context>(
+        _ items: [Item], generation: Int,
+        cacheElement: (Item) -> (windowID: Int?, element: AXUIElement?),
+        pendingSession: (Session) -> (presses: [Bool], context: Context)?,
+        emptyLog: String,
+        initialIndex: ([Item], _ backward: Bool) -> Int,
+        commit: ([Item], Int, Context) -> Void,
+        present: ([Item], Int, Context) -> Void
+    ) {
         // Remember every element the sweep saw - even from a stale
         // generation, the elements are real. Cross-Space rows carry none;
         // the repaint nudge resolves theirs from this cache.
         for item in items {
-            if let windowID = item.windowID, let element = item.axWindow {
+            let handle = cacheElement(item)
+            if let windowID = handle.windowID, let element = handle.element {
                 WindowElements.note(element, for: windowID)
             }
         }
-        // Cmd already released: a quick tap commits straight from here,
-        // never showing the panel.
+        // The binding already released: a quick tap commits straight from
+        // here, never showing the panel.
         if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
-            let pending = pendingCommits.remove(at: pendingIndex)
+            let pendingEntry = pendingCommits.remove(at: pendingIndex)
             guard generation > appliedGeneration else {
                 Log.write("stale pending commit dropped: generation \(generation) superseded")
                 return
             }
-            guard case .pendingApps(let presses) = pending.session else { return }
+            guard let (presses, context) = pendingSession(pendingEntry.session) else { return }
             guard !items.isEmpty else {
-                Log.write("apps snapshot empty; consumed Cmd+Tab dropped")
+                Log.write(emptyLog)
                 return
             }
             appliedGeneration = generation
-            activate(items[replay(presses, count: items.count,
-                                  initial: initialAppsIndex(items: items, backward: presses[0]))])
+            commit(items, replay(presses, count: items.count,
+                                 initial: initialIndex(items, presses[0])), context)
             return
         }
         guard generation == snapshotGeneration,
-              case .pendingApps(let presses) = session else { return }
+              let (presses, context) = session.flatMap(pendingSession) else { return }
         guard !items.isEmpty else {
-            Log.write("apps snapshot empty; consumed Cmd+Tab dropped")
+            Log.write(emptyLog)
             session = nil
             return
         }
         appliedGeneration = generation
-        let index = replay(presses, count: items.count,
-                           initial: initialAppsIndex(items: items, backward: presses[0]))
-        session = .apps(items, index: index)
-        presentPanel(
-            rows: items.map {
-                SwitcherRow(icon: $0.app.icon, title: $0.appName, subtitle: $0.windowTitle,
-                            annotation: annotation(for: $0))
+        present(items, replay(presses, count: items.count,
+                              initial: initialIndex(items, presses[0])), context)
+    }
+
+    private func finishAppsSnapshot(_ items: [ListEntry], generation: Int) {
+        finishSnapshot(
+            items, generation: generation,
+            cacheElement: { ($0.windowID, $0.axWindow) },
+            pendingSession: {
+                if case .pendingApps(let presses) = $0 { return (presses, ()) }
+                return nil
             },
-            selected: index
+            emptyLog: "apps snapshot empty; consumed switcher tap dropped",
+            initialIndex: { self.initialAppsIndex(items: $0, backward: $1) },
+            commit: { items, index, _ in self.activate(items[index]) },
+            present: { items, index, _ in
+                self.session = .apps(items, index: index)
+                self.presentPanel(rows: self.appRows(items), selected: index)
+            }
         )
     }
 
     // Mid Space-transition an app can blow the 0.05s AX messaging timeout
-    // and list no current-Space windows at all; a session resolved against
-    // such a CG-only list commits an other-Space row and mis-navigates
-    // (observed as back-to-back jumps to the same Space when Cmd+` is
-    // pressed rapidly across Spaces). The frontmost app always has at
-    // least one current-Space window, so an AX-empty list is implausible:
-    // retry once shortly; the session stays pending and presses accumulate.
+    // and list no windows at all; a session resolved against such a
+    // CG-only list commits an other-Space row and mis-navigates (observed
+    // as back-to-back jumps to the same Space when the cycle binding is
+    // pressed rapidly across Spaces). An AX-blind sweep - as opposed to
+    // one whose rows were merely filtered - retries once shortly; the
+    // session stays pending and presses accumulate.
     private func buildWindowsSnapshot(for app: NSRunningApplication, appName: String,
                                       generation: Int, attempt: Int) {
-        SnapshotQueue.shared.async { [weak self] in
-            guard let self else { return }
-            let inputs = DispatchQueue.main.sync {
-                SnapshotInputs.capture(mru: self.mru, recency: self.recency,
-                                       aerospace: self.aerospace, includeApps: false)
-            }
-            let items = WindowListProvider.snapshot(for: app, appName: appName, inputs: inputs)
-            DispatchQueue.main.async {
-                if attempt == 0, !items.contains(where: { $0.element != nil }) {
-                    Log.write("windows snapshot: no AX rows for pid=\(app.processIdentifier); retrying")
-                    // The retry waits on MAIN and re-dispatches: a delayed
-                    // block on the serial queue would lose its FIFO slot,
-                    // and sleeping on the queue would block newer work.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                        self?.buildWindowsSnapshot(for: app, appName: appName,
-                                                   generation: generation, attempt: 1)
+        runSweep(includeApps: false) { inputs in
+            let snapshot = WindowListProvider.snapshot(for: app, appName: appName, inputs: inputs)
+            return { [weak self] in
+                guard let self else { return }
+                if attempt == 0, !snapshot.sawAXWindows {
+                    // Only retry while someone still wants this generation:
+                    // the live session, or a parked commit not yet
+                    // superseded - a superseded retry would sweep for a
+                    // result the finish discards anyway. The retry waits on
+                    // MAIN and re-dispatches: a delayed block on the serial
+                    // queue would lose its FIFO slot, and sleeping on the
+                    // queue would block newer work.
+                    let wanted = generation == self.snapshotGeneration
+                        || (generation > self.appliedGeneration
+                            && self.pendingCommits.contains { $0.generation == generation })
+                    if wanted {
+                        Log.write("windows snapshot: no AX rows for pid=\(app.processIdentifier); retrying")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                            self?.buildWindowsSnapshot(for: app, appName: appName,
+                                                       generation: generation, attempt: 1)
+                        }
+                        return
                     }
-                    return
                 }
-                self.finishWindowsSnapshot(items, generation: generation)
+                self.finishWindowsSnapshot(snapshot.items, generation: generation)
             }
         }
     }
 
     private func finishWindowsSnapshot(_ items: [WindowItem], generation: Int) {
-        for item in items {
-            if let windowID = item.windowID, let element = item.element {
-                WindowElements.note(element, for: windowID)
-            }
-        }
-        if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
-            let pending = pendingCommits.remove(at: pendingIndex)
-            guard generation > appliedGeneration else {
-                Log.write("stale pending commit dropped: generation \(generation) superseded")
-                return
-            }
-            guard case .pendingWindows(let app, let presses) = pending.session else { return }
-            guard !items.isEmpty else {
-                Log.write("window snapshot empty; consumed Cmd+` dropped")
-                return
-            }
-            appliedGeneration = generation
-            let item = items[replay(presses, count: items.count,
-                                    initial: startIndex(count: items.count, backward: presses[0]))]
-            focus(app: app, element: item.element, windowID: item.windowID,
-                  spaceID: item.spaceID, workspace: item.aerospaceWorkspace)
-            return
-        }
-        guard generation == snapshotGeneration,
-              case .pendingWindows(let app, let presses) = session else { return }
-        guard !items.isEmpty else {
-            Log.write("window snapshot empty; consumed Cmd+` dropped")
-            session = nil
-            return
-        }
-        appliedGeneration = generation
-        let index = replay(presses, count: items.count,
-                           initial: startIndex(count: items.count, backward: presses[0]))
-        session = .windows(app, items, index: index)
-        presentPanel(
-            rows: items.map {
-                SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
-                            annotation: annotation(for: $0))
+        finishSnapshot(
+            items, generation: generation,
+            cacheElement: { ($0.windowID, $0.element) },
+            pendingSession: {
+                if case .pendingWindows(let app, let presses) = $0 { return (presses, app) }
+                return nil
             },
-            selected: index
+            emptyLog: "window snapshot empty; consumed cycle tap dropped",
+            initialIndex: { items, backward in self.startIndex(count: items.count, backward: backward) },
+            commit: { items, index, app in
+                let item = items[index]
+                self.focus(app: app, element: item.element, windowID: item.windowID,
+                           spaceID: item.spaceID, workspace: item.aerospaceWorkspace)
+            },
+            present: { items, index, app in
+                self.session = .windows(app, items, index: index)
+                self.presentPanel(rows: self.windowRows(app, items), selected: index)
+            }
         )
+    }
+
+    private func appRows(_ items: [ListEntry]) -> [SwitcherRow] {
+        items.map {
+            SwitcherRow(icon: $0.app.icon, title: $0.appName, subtitle: $0.windowTitle,
+                        annotation: annotation(for: $0))
+        }
+    }
+
+    private func windowRows(_ app: NSRunningApplication, _ items: [WindowItem]) -> [SwitcherRow] {
+        items.map {
+            SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
+                        annotation: annotation(for: $0))
+        }
     }
 
     // The first press picked the start index; each further press steps.
@@ -502,10 +539,7 @@ final class SwitcherController {
             }
             let clamped = min(index, remaining.count - 1)
             session = .windows(app, remaining, index: clamped)
-            panel.setRows(remaining.map {
-                SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
-                            annotation: annotation(for: $0))
-            }, selected: clamped)
+            panel.setRows(windowRows(app, remaining), selected: clamped)
         case .pendingApps, .pendingWindows, nil:
             break
         }
@@ -518,10 +552,7 @@ final class SwitcherController {
         }
         let clamped = min(index, items.count - 1)
         session = .apps(items, index: clamped)
-        panel.setRows(items.map {
-            SwitcherRow(icon: $0.app.icon, title: $0.appName, subtitle: $0.windowTitle,
-                        annotation: annotation(for: $0))
-        }, selected: clamped)
+        panel.setRows(appRows(items), selected: clamped)
     }
 
     private func annotation(for entry: ListEntry) -> String? {
