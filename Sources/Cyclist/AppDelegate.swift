@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installMainMenu()
         Settings.registerDefaults()
         Config.load()
         AX.configureGlobalTimeout()
@@ -61,6 +62,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !screenRecording {
             CGRequestScreenCaptureAccess()
         }
+    }
+
+    // An accessory app shows no menu bar, but key-equivalent routing still
+    // consults the main menu while the app is active (a utility window is
+    // key) - without one, Cmd+W and Cmd+Q are dead in those windows.
+    private func installMainMenu() {
+        let main = NSMenu()
+        let appMenu = NSMenu()
+        appMenu.addItem(NSMenuItem(
+            title: "Quit Cyclist", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(NSMenuItem(
+            title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+        let windowItem = NSMenuItem()
+        windowItem.submenu = windowMenu
+        main.addItem(windowItem)
+        NSApp.mainMenu = main
     }
 
     private func ensurePermissionAndStart() {
