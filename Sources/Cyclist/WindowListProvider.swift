@@ -70,14 +70,9 @@ enum WindowListProvider {
             }
         }
         AppListProvider.flushTitleCache()
-        // Most recently focused first: index 0 becomes the current window,
-        // so the session's start index (1) is the most recent OTHER window
-        // and a quick Cmd+` bounces between the last two. Index tiebreak
-        // keeps AX order for untracked windows (Swift's sort is unstable).
-        return items.enumerated().sorted { a, b in
-            let rankA = a.element.windowID.flatMap { inputs.ranks[$0] } ?? 0
-            let rankB = b.element.windowID.flatMap { inputs.ranks[$0] } ?? 0
-            return rankA != rankB ? rankA > rankB : a.offset < b.offset
-        }.map(\.element)
+        // Index 0 becomes the current window, so the session's start index
+        // (1) is the most recent OTHER window and a quick Cmd+` bounces
+        // between the last two.
+        return sortedByRecency(items, ranks: inputs.ranks, windowID: \.windowID)
     }
 }

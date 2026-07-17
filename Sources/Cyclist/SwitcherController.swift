@@ -307,7 +307,8 @@ final class SwitcherController {
         SnapshotQueue.shared.async { [weak self] in
             guard let self else { return }
             let inputs = DispatchQueue.main.sync {
-                SnapshotInputs.capture(mru: self.mru, recency: self.recency, aerospace: self.aerospace)
+                SnapshotInputs.capture(mru: self.mru, recency: self.recency,
+                                       aerospace: self.aerospace, includeApps: false)
             }
             let items = WindowListProvider.snapshot(for: app, appName: appName, inputs: inputs)
             DispatchQueue.main.async {
@@ -541,7 +542,7 @@ final class SwitcherController {
     }
 
     // Delay showing the panel slightly so a quick Cmd+Tab tap switches to the
-    // previous app without a visual flash.
+    // previous window without a visual flash.
     private func presentPanel(rows: [SwitcherRow], selected: Int) {
         panel.setRows(rows, selected: selected)
         let work = DispatchWorkItem { [weak self] in self?.panel.show() }

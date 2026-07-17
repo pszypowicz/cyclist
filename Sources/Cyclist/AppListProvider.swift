@@ -322,16 +322,7 @@ enum AppListProvider {
                 aerospaceWorkspace: nil
             ))
         }
-        // Most recently focused window first within the app. Swift's
-        // sort is not stable, so the original index is the tiebreak:
-        // untracked windows (rank 0, including the handle-less fallback
-        // rows) keep their AX-then-CG order instead of shuffling
-        // between snapshots.
-        let ranked = appEntries.enumerated().sorted { a, b in
-            let rankA = a.element.windowID.flatMap { inputs.ranks[$0] } ?? 0
-            let rankB = b.element.windowID.flatMap { inputs.ranks[$0] } ?? 0
-            return rankA != rankB ? rankA > rankB : a.offset < b.offset
-        }
-        return AppSweep(entries: ranked.map(\.element), titles: titles)
+        return AppSweep(entries: sortedByRecency(appEntries, ranks: inputs.ranks, windowID: \.windowID),
+                        titles: titles)
     }
 }

@@ -3,8 +3,9 @@ import Foundation
 // Every setting lives in standard user defaults, so the Settings window
 // and `defaults write io.github.pszypowicz.Cyclist ...` are the same
 // mechanism - external writes apply to the running app via KVO
-// (AppDelegate observes the AeroSpace key, whose flip has a side effect;
-// the shortcut store below re-parses its own).
+// (AppDelegate observes the keys with side effects - the AeroSpace
+// bridge and the menu bar icon; the shortcut store below re-parses its
+// own).
 enum Settings {
     static let includeHiddenKey = "includeHidden"
     static let includeMinimizedKey = "includeMinimized"

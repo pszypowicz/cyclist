@@ -1,4 +1,5 @@
-import AppKit
+import ApplicationServices
+import Foundation
 
 // Private SkyLight/CoreGraphics symbols, the same ones AltTab and yabai rely
 // on. Public APIs cannot report which Space a window belongs to, and Space

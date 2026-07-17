@@ -53,7 +53,7 @@ While the switcher is open (Cmd held):
 | Esc             | Cancel                          |
 | Release Cmd     | Switch to the selected item     |
 
-Quit and Close keep the list open: the affected rows leave and the selection moves to a neighbor.
+In the app switcher, Quit and Close keep the list open: the affected rows leave and the selection moves to a neighbor. In the window cycler, quitting the app ends the session (every row belonged to it).
 
 ## Requirements
 

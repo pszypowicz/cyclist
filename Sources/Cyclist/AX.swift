@@ -94,33 +94,10 @@ enum AX {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.05)
     }
 
-    static func windows(pid: pid_t) -> [AXUIElement] {
-        let appElement = AXUIElementCreateApplication(pid)
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &value) == .success,
-              let array = value as? [AnyObject] else {
-            return []
-        }
-        return array.compactMap { item in
-            guard CFGetTypeID(item) == AXUIElementGetTypeID() else { return nil }
-            let element = item as! AXUIElement
-            // Finder reports the desktop as a full-screen AXScrollArea in its
-            // window list; only real AXWindow elements count.
-            guard string(element, kAXRoleAttribute) == kAXWindowRole as String else { return nil }
-            return element
-        }
-    }
-
     static func bool(_ element: AXUIElement, _ attribute: String) -> Bool? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
         return value as? Bool
-    }
-
-    static func string(_ element: AXUIElement, _ attribute: String) -> String? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
-        return value as? String
     }
 
     static func setBool(_ element: AXUIElement, _ attribute: String, _ flag: Bool) {
@@ -193,7 +170,10 @@ enum AX {
         setPosition(resolved, CGPoint(x: origin.x + 1, y: origin.y))
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
             setPosition(resolved, origin)
-            if attempt == 0 {
+            // Every successful nudge gets one delayed repeat (a success on
+            // a RETRY is the highest-risk case - the app was mid-timeout);
+            // attempt 3 marks the repeat itself, which never re-repeats.
+            if attempt < 3 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     repaintNudge(pid: pid, windowID: windowID, element: resolved, attempt: 3)
                 }

@@ -12,8 +12,14 @@ import ApplicationServices
 // window destroy.
 enum WindowElements {
     private static var byID: [Int: AXUIElement] = [:]
+    // A destroy event can land while a sweep still holding the window's
+    // element is in flight; that sweep's finish would re-add the dead
+    // entry and no second destroy ever comes. The last few destroyed ids
+    // are refused (window ids never recycle within a boot).
+    private static var tombstones: [Int] = []
 
     static func note(_ element: AXUIElement, for windowID: Int) {
+        guard !tombstones.contains(windowID) else { return }
         byID[windowID] = element
     }
 
@@ -23,5 +29,9 @@ enum WindowElements {
 
     static func evict(windowID: Int) {
         byID.removeValue(forKey: windowID)
+        tombstones.append(windowID)
+        if tombstones.count > 64 {
+            tombstones.removeFirst()
+        }
     }
 }
