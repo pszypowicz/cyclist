@@ -78,7 +78,7 @@ open /Applications/Cyclist.app
 
 The build script signs with your "Apple Development" certificate when one is present so the Accessibility grant survives rebuilds. See `scripts/build-app.sh --help` for options.
 
-On first launch Cyclist prompts for Accessibility permission and activates itself once granted. It lives in the menu bar (no Dock icon); the menu holds an Enabled switch (turns every hook off, the icon dims, and the native shortcuts work again immediately), the list settings, a native Launch at Login toggle (registers with System Settings > General > Login Items), and Quit.
+On first launch Cyclist prompts for Accessibility permission and activates itself once granted. It lives in the menu bar (no Dock icon); the menu holds an Enabled switch (turns every hook off, the icon dims, and the native shortcuts work again immediately), the list settings, a native Launch at Login toggle (registers with System Settings > General > Login Items), About, and Quit.
 
 ## Configuration
 

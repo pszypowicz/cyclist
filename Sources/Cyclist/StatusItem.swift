@@ -40,10 +40,9 @@ final class StatusItemController: NSObject {
         menu.addItem(loginItem)
         menu.addItem(.separator())
 
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
-        let versionItem = NSMenuItem(title: "Cyclist \(version) (beta)", action: nil, keyEquivalent: "")
-        versionItem.isEnabled = false
-        menu.addItem(versionItem)
+        let aboutItem = NSMenuItem(title: "About Cyclist", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
 
         let quitItem = NSMenuItem(title: "Quit Cyclist", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quitItem.target = NSApp
@@ -62,6 +61,10 @@ final class StatusItemController: NSObject {
             changeHandlers[key] = onChange
         }
         return item
+    }
+
+    @objc private func showAbout() {
+        AboutView.showWindow()
     }
 
     @objc private func toggle(_ sender: NSMenuItem) {
