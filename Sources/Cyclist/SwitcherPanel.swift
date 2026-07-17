@@ -138,9 +138,14 @@ final class SwitcherPanel {
 
     // Advancing the selection means the user is browsing, so the panel shows
     // immediately even if the quick-tap grace delay has not elapsed yet.
+    // The debug timing covers the on-screen probe and ordering, not the
+    // deferred SwiftUI render - it answers "does the per-press WindowServer
+    // round trip cost anything" (issue #37).
     func select(index: Int) {
+        let started = Date()
         model.selected = index
         show()
+        Log.debug("panel: select \(Int(Date().timeIntervalSince(started) * 1000))ms rows=\(model.rows.count)")
     }
 
     // The WindowServer can silently refuse to bring an existing panel
