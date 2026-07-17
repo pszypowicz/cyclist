@@ -5,16 +5,19 @@ usage() {
   cat <<'EOF'
 Build Cyclist.app from the Swift package.
 
-Usage: scripts/build-app.sh [--configuration debug|release] [--identity <substring|adhoc>] [--output <dir>]
+Usage: scripts/build-app.sh [--configuration debug|release] [--identity <substring|adhoc>] [--hardened-runtime] [--output <dir>]
 
 Flags:
-  --configuration  Swift build configuration: debug or release (default: release)
-  --identity       Codesign identity, matched as a substring against
-                   'security find-identity' output (default: "Apple Development").
-                   Pass "adhoc" to ad-hoc sign; note that ad-hoc builds lose
-                   the Accessibility grant on every rebuild.
-  --output         Directory to place Cyclist.app in (default: build)
-  -h, --help       Show this help.
+  --configuration     Swift build configuration: debug or release (default: release)
+  --identity          Codesign identity, matched as a substring against
+                      'security find-identity' output (default: "Apple Development").
+                      Pass "adhoc" to ad-hoc sign; note that ad-hoc builds lose
+                      the Accessibility grant on every rebuild.
+  --hardened-runtime  Sign with the hardened runtime and a secure timestamp,
+                      as notarization requires. Needs network (timestamp
+                      service) and a real identity.
+  --output            Directory to place Cyclist.app in (default: build)
+  -h, --help          Show this help.
 
 Example:
   scripts/build-app.sh --configuration release
@@ -23,12 +26,14 @@ EOF
 
 configuration=release
 identity="Apple Development"
+hardened=false
 output=build
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --configuration) configuration="$2"; shift 2 ;;
     --identity) identity="$2"; shift 2 ;;
+    --hardened-runtime) hardened=true; shift ;;
     --output) output="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
@@ -66,5 +71,10 @@ else
   fi
 fi
 
-codesign --force --sign "$sign" "$app"
+sign_flags=()
+if [[ "$hardened" == true ]]; then
+  sign_flags+=(--options runtime --timestamp)
+fi
+# The ${arr[@]+...} form survives set -u on an empty array under bash 3.2.
+codesign --force ${sign_flags[@]+"${sign_flags[@]}"} --sign "$sign" "$app"
 echo "Built $app"

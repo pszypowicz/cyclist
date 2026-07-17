@@ -70,7 +70,7 @@ In the app switcher, Quit and Close keep the list open: the affected rows leave 
 brew install --cask pszypowicz/tap/cyclist
 ```
 
-The cask clears the quarantine flag (release builds are not notarized yet) and launches the app after install.
+Release builds are signed with a Developer ID certificate and notarized, so Gatekeeper accepts them as-is; the cask launches the app after install.
 
 ### Build from source
 
