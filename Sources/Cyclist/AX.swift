@@ -157,12 +157,33 @@ enum AX {
     // same path AeroSpace heals with when it re-tiles. The restore is
     // deferred one turn so the move commits as a distinct change rather than
     // coalescing to a no-op.
-    static func repaintNudge(pid: pid_t, windowID: Int) {
-        guard let element = windows(pid: pid).first(where: { self.windowID(of: $0) == windowID }),
-              let origin = position(element) else { return }
-        setPosition(element, CGPoint(x: origin.x + 1, y: origin.y))
+    //
+    // One shot is not enough under rapid bouncing (measured ~17% of fast
+    // arrivals still wallpaper at +0.6s): mid-arrival the app can blow the
+    // AX timeout - the enumeration returns nothing and the nudge silently
+    // no-ops - or the nudge lands before the compositor re-requests
+    // content. So: use the commit's own element when the row carried one,
+    // retry a failed resolution briefly, and always repeat one delayed
+    // nudge after a successful one.
+    static func repaintNudge(pid: pid_t, windowID: Int, element: AXUIElement? = nil, attempt: Int = 0) {
+        guard attempt < 4 else { return }
+        guard let resolved = element ?? windows(pid: pid).first(where: { self.windowID(of: $0) == windowID }),
+              let origin = position(resolved) else {
+            // Re-resolve from scratch next time: a passed element that
+            // refuses a position read may be stale.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                repaintNudge(pid: pid, windowID: windowID, attempt: attempt + 1)
+            }
+            return
+        }
+        setPosition(resolved, CGPoint(x: origin.x + 1, y: origin.y))
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-            setPosition(element, origin)
+            setPosition(resolved, origin)
+            if attempt == 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
+                    repaintNudge(pid: pid, windowID: windowID, element: resolved, attempt: 3)
+                }
+            }
         }
     }
 

@@ -664,7 +664,7 @@ final class SwitcherController {
                self?.focusWindow(app: app, element: element, windowID: windowID)
                // A window reached in another Space can arrive with a purged
                // backing (blank though focused); a geometry nudge repaints it.
-               AX.repaintNudge(pid: app.processIdentifier, windowID: windowID)
+               AX.repaintNudge(pid: app.processIdentifier, windowID: windowID, element: element)
            }) {
             Log.write("navigate: pid=\(app.processIdentifier) space=\(spaceID)")
             return
