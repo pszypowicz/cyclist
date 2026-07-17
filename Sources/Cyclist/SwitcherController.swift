@@ -47,6 +47,7 @@ final class SwitcherController {
     // is on, and Cmd+` lists the wrong app's windows. Right after our own
     // commit, we are the fresher source of truth.
     private var lastCommit: (app: NSRunningApplication, at: Date)?
+    private var activationObserver: NSObjectProtocol?
 
     // Fired when the key tap dies (e.g. Accessibility revoked at runtime);
     // the owner polls for the grant and calls start() to rebuild.
@@ -86,6 +87,24 @@ final class SwitcherController {
         }
         tap.onInvalidated = { [weak self] in
             self?.onTapInvalidated?()
+        }
+        // A genuine user-driven app switch (mouse, Dock) supersedes the
+        // commit bridge: holding lastCommit for its full 1.5s made a quick
+        // window-cycle right after such a switch list the COMMITTED app's
+        // windows instead of the frontmost one (#22). Cyclist's own
+        // activation notifications lag their commit by up to ~1s, so a
+        // cross-app arrival right after a rapid double-commit belongs to
+        // the superseded commit and must not clear the fresh bridge - the
+        // 0.2s grace covers that, at the cost of a user switch inside
+        // those 200ms still hitting the stale bridge.
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let lastCommit = self.lastCommit,
+                  let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.processIdentifier != lastCommit.app.processIdentifier,
+                  Date().timeIntervalSince(lastCommit.at) > 0.2 else { return }
+            self.lastCommit = nil
         }
     }
 
