@@ -68,6 +68,23 @@ final class AeroSpaceClient {
         return visibleWorkspaces.contains(workspace) ? nil : workspace
     }
 
+    // Value snapshot of the workspace caches for off-main sweeps; the live
+    // dictionaries are main-thread-mutated and must not be read elsewhere.
+    struct WorkspaceSnapshot {
+        let windowWorkspace: [Int: String]
+        let visibleWorkspaces: Set<String>
+
+        // Same rule as hiddenWorkspace(forWindow:) on the live client.
+        func hiddenWorkspace(forWindow id: Int) -> String? {
+            guard let workspace = windowWorkspace[id] else { return nil }
+            return visibleWorkspaces.contains(workspace) ? nil : workspace
+        }
+    }
+
+    func workspaceSnapshot() -> WorkspaceSnapshot {
+        WorkspaceSnapshot(windowWorkspace: windowWorkspace, visibleWorkspaces: visibleWorkspaces)
+    }
+
     // Window IDs AeroSpace assigns to a workspace, visible or hidden alike.
     func windowIDs(inWorkspace name: String) -> [Int] {
         windowWorkspace.compactMap { $0.value == name ? $0.key : nil }

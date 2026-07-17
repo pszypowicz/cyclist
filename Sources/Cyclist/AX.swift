@@ -20,22 +20,68 @@ struct AXWindowInfo {
 // (a stalled event tap callback gets disabled by the system).
 enum AX {
     // Standard and dialog windows of the app, with title, minimized state,
-    // and CG window id. A window whose subrole is unreadable passes the
-    // filter (matching apps that report no subrole at all).
+    // and CG window id, at ONE batched attribute IPC per window (plus the
+    // window-id call) instead of four. A window whose subrole is unreadable
+    // passes the filter (matching apps that report no subrole at all); an
+    // unreadable ROLE drops the window - Finder reports the desktop as a
+    // full-screen AXScrollArea, and only real AXWindow elements count.
     static func qualifiedWindows(pid: pid_t) -> [AXWindowInfo] {
-        windows(pid: pid).compactMap { window in
-            if let subrole = string(window, kAXSubroleAttribute) {
+        rawWindows(pid: pid).compactMap { window in
+            guard let slots = batch(window, [kAXRoleAttribute, kAXSubroleAttribute,
+                                             kAXTitleAttribute, kAXMinimizedAttribute]) else { return nil }
+            guard slots[0] as? String == kAXWindowRole as String else { return nil }
+            if let subrole = slots[1] as? String {
                 guard subrole == kAXStandardWindowSubrole as String
                         || subrole == kAXDialogSubrole as String else { return nil }
             }
-            let title = string(window, kAXTitleAttribute)
+            let title = slots[2] as? String
             return AXWindowInfo(
                 element: window,
                 title: (title?.isEmpty == false) ? title : nil,
-                isMinimized: bool(window, kAXMinimizedAttribute) == true,
+                isMinimized: (slots[3] as? Bool) == true,
                 windowID: windowID(of: window)
             )
         }
+    }
+
+    // Window id and title of every real window, for the title harvest: one
+    // batched IPC per window instead of separate role and title reads.
+    static func windowTitles(pid: pid_t) -> [(windowID: Int, title: String)] {
+        rawWindows(pid: pid).compactMap { window in
+            guard let slots = batch(window, [kAXRoleAttribute, kAXTitleAttribute]),
+                  slots[0] as? String == kAXWindowRole as String,
+                  let title = slots[1] as? String, !title.isEmpty,
+                  let windowID = windowID(of: window) else { return nil }
+            return (windowID, title)
+        }
+    }
+
+    // The app's window elements with no per-element attribute reads; role
+    // filtering rides the callers' batched copies.
+    private static func rawWindows(pid: pid_t) -> [AXUIElement] {
+        let appElement = AXUIElementCreateApplication(pid)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &value) == .success,
+              let array = value as? [AnyObject] else {
+            return []
+        }
+        return array.compactMap { item in
+            guard CFGetTypeID(item) == AXUIElementGetTypeID() else { return nil }
+            return (item as! AXUIElement)
+        }
+    }
+
+    // One round trip for several attributes. A slot whose attribute could
+    // not be read arrives as an AXValue error placeholder, which fails the
+    // callers' typed casts; a message-level failure (timeout, dead element)
+    // returns nil and the caller drops the element - matching the old
+    // per-attribute path, where the first failed read dropped it.
+    private static func batch(_ element: AXUIElement, _ attributes: [String]) -> [AnyObject]? {
+        var values: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(
+                element, attributes as CFArray, AXCopyMultipleAttributeOptions(), &values) == .success,
+              let slots = values as? [AnyObject], slots.count == attributes.count else { return nil }
+        return slots
     }
 
     static func windowID(of element: AXUIElement) -> Int? {

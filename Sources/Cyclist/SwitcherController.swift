@@ -218,24 +218,30 @@ final class SwitcherController {
         case .windows, .pendingWindows:
             break
         case nil:
-            // The snapshot's AX sweep can take long enough to get the tap
-            // disabled (and stall all keyboard input behind the callback),
-            // so it runs after the callback returns; presses and the Cmd
-            // release accumulate on the pending session meanwhile. Snapshots
-            // are dispatched in session order, so a fresh session started
-            // right after a quick tap resolves after the tap's commit.
+            // The AX sweep runs on the snapshot queue, so the main run
+            // loop - which services the event taps - never blocks on an
+            // unresponsive app; presses and the Cmd release accumulate on
+            // the pending session meanwhile. The queue is serial, so
+            // snapshots complete in session order and a fresh session
+            // started right after a quick tap resolves after the tap's
+            // commit. The sweep captures its inputs on main at its start
+            // (see SnapshotInputs), behind any prior snapshot's commit.
             session = .pendingApps(presses: [backward])
             snapshotGeneration += 1
             let generation = snapshotGeneration
             // Freshen the workspace cache for commit time and the next
-            // session; the snapshot below reads whatever is cached now.
+            // session; the sweep reads whatever is captured at its start.
             aerospace.refresh()
             aerospace.kick()
-            DispatchQueue.main.async { [weak self] in
+            SnapshotQueue.shared.async { [weak self] in
                 guard let self else { return }
-                self.finishAppsSnapshot(
-                    AppListProvider.snapshot(mru: self.mru, recency: self.recency, aerospace: self.aerospace),
-                    generation: generation)
+                let inputs = DispatchQueue.main.sync {
+                    SnapshotInputs.capture(mru: self.mru, recency: self.recency, aerospace: self.aerospace)
+                }
+                let entries = AppListProvider.snapshot(inputs: inputs)
+                DispatchQueue.main.async {
+                    self.finishAppsSnapshot(entries, generation: generation)
+                }
             }
         }
     }
@@ -255,9 +261,8 @@ final class SwitcherController {
             session = .pendingWindows(app, presses: [backward])
             snapshotGeneration += 1
             let generation = snapshotGeneration
-            DispatchQueue.main.async { [weak self] in
-                self?.buildWindowsSnapshot(for: app, generation: generation, attempt: 0)
-            }
+            buildWindowsSnapshot(for: app, appName: app.localizedName ?? "Untitled",
+                                 generation: generation, attempt: 0)
         }
     }
 
@@ -301,16 +306,29 @@ final class SwitcherController {
     // pressed rapidly across Spaces). The frontmost app always has at
     // least one current-Space window, so an AX-empty list is implausible:
     // retry once shortly; the session stays pending and presses accumulate.
-    private func buildWindowsSnapshot(for app: NSRunningApplication, generation: Int, attempt: Int) {
-        let items = WindowListProvider.snapshot(for: app, recency: recency, aerospace: aerospace)
-        if attempt == 0, !items.contains(where: { $0.element != nil }) {
-            Log.write("windows snapshot: no AX rows for pid=\(app.processIdentifier); retrying")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                self?.buildWindowsSnapshot(for: app, generation: generation, attempt: 1)
+    private func buildWindowsSnapshot(for app: NSRunningApplication, appName: String,
+                                      generation: Int, attempt: Int) {
+        SnapshotQueue.shared.async { [weak self] in
+            guard let self else { return }
+            let inputs = DispatchQueue.main.sync {
+                SnapshotInputs.capture(mru: self.mru, recency: self.recency, aerospace: self.aerospace)
             }
-            return
+            let items = WindowListProvider.snapshot(for: app, appName: appName, inputs: inputs)
+            DispatchQueue.main.async {
+                if attempt == 0, !items.contains(where: { $0.element != nil }) {
+                    Log.write("windows snapshot: no AX rows for pid=\(app.processIdentifier); retrying")
+                    // The retry waits on MAIN and re-dispatches: a delayed
+                    // block on the serial queue would lose its FIFO slot,
+                    // and sleeping on the queue would block newer work.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                        self?.buildWindowsSnapshot(for: app, appName: appName,
+                                                   generation: generation, attempt: 1)
+                    }
+                    return
+                }
+                self.finishWindowsSnapshot(items, generation: generation)
+            }
         }
-        finishWindowsSnapshot(items, generation: generation)
     }
 
     private func finishWindowsSnapshot(_ items: [WindowItem], generation: Int) {

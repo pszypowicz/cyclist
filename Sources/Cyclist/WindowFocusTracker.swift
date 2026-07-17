@@ -111,6 +111,11 @@ final class WindowFocusTracker {
         windowID.flatMap { sequence[$0] } ?? 0
     }
 
+    // Value copy for off-main sweeps; `sequence` itself is main-confined.
+    func ranksSnapshot() -> [Int: UInt64] {
+        sequence
+    }
+
     // Called from the switcher right before it activates an app, so the
     // raise-storm snapshot is in place even when the storm beats the
     // activation notification.
