@@ -21,6 +21,7 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 - Ctrl+Left/Right walks the native Spaces of the active display (the one holding the menu bar) in Mission Control order - user desktops and fullscreen Spaces alike - instantly and without animation. Arriving on a desktop focuses its top window, so leaving a fullscreen app always lands somewhere concrete.
 - The trackpad's Spaces swipe (three or four fingers, per System Settings > Trackpad > More Gestures) drives that same navigation: Cyclist intercepts the gesture before the Dock sees it and steps instantly instead of playing the animated transition. The system gesture must stay **enabled** - it is what makes macOS emit the gesture events at all. A Settings toggle ("Trackpad swipe navigation") hands the gesture back to macOS at any time.
 - With [AeroSpace](https://github.com/nikitabobko/AeroSpace) running, its workspaces join that ring in place of the desktop hosting them, so Ctrl+Left/Right walks `workspace 1 ... workspace N, fullscreen Spaces` seamlessly - workspace steps go over AeroSpace's socket, and crossing from a fullscreen Space lands on the ring-adjacent workspace. Windows parked in hidden workspaces appear in the switcher as `workspace N` rows; selecting one switches there. A workspace whose windows all went native-fullscreen is hollow - its windows display on their own Spaces and visiting it shows a bare desktop - so the ring skips it by default and the fullscreen Space itself is the stop; the `showHollowWorkspaces` setting restores those stops. The integration is opt-in (Settings > AeroSpace, or the `aerospaceIntegration` default) and everything falls back to plain native behavior the moment AeroSpace is absent or disabled.
+- Every piece is optional: independent Settings toggles turn off the app switcher, the window cycler, keyboard Space navigation, and the trackpad swipe. A disabled binding passes through to macOS immediately, so Cyclist can run as just a Spaces/workspace navigator - or just a switcher.
 - Four independent settings control what shows up in the list:
   - include **hidden** apps (Cmd+H)
   - include **minimized** apps (all windows in the Dock)
@@ -94,6 +95,8 @@ defaults write io.github.pszypowicz.Cyclist switcherShortcut "alt+tab"
 
 | Key                       | Type   | Default        |
 | ------------------------- | ------ | -------------- |
+| `appSwitcher`             | bool   | `true`         |
+| `windowCycler`            | bool   | `true`         |
 | `includeHidden`           | bool   | `true`         |
 | `includeMinimized`        | bool   | `true`         |
 | `includeOtherSpaces`      | bool   | `true`         |

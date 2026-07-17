@@ -7,6 +7,8 @@ import Foundation
 // bridge and the menu bar icon; the shortcut store below re-parses its
 // own).
 enum Settings {
+    static let appSwitcherKey = "appSwitcher"
+    static let windowCyclerKey = "windowCycler"
     static let includeHiddenKey = "includeHidden"
     static let includeMinimizedKey = "includeMinimized"
     static let includeOtherSpacesKey = "includeOtherSpaces"
@@ -24,6 +26,8 @@ enum Settings {
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
+            appSwitcherKey: true,
+            windowCyclerKey: true,
             includeHiddenKey: true,
             includeMinimizedKey: true,
             includeOtherSpacesKey: true,
@@ -39,6 +43,14 @@ enum Settings {
             previousSpaceShortcutKey: "ctrl+left",
             nextSpaceShortcutKey: "ctrl+right",
         ])
+    }
+
+    static var appSwitcher: Bool {
+        UserDefaults.standard.bool(forKey: appSwitcherKey)
+    }
+
+    static var windowCycler: Bool {
+        UserDefaults.standard.bool(forKey: windowCyclerKey)
     }
 
     static var includeHidden: Bool {
