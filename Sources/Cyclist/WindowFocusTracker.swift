@@ -93,6 +93,7 @@ final class WindowFocusTracker {
         events.onDestroyed = { [weak self] windowID in
             self?.sequence.removeValue(forKey: windowID)
             AppListProvider.evictTitle(windowID: windowID)
+            WindowElements.evict(windowID: windowID)
         }
     }
 

@@ -274,6 +274,14 @@ final class SwitcherController {
     }
 
     private func finishAppsSnapshot(_ items: [ListEntry], generation: Int) {
+        // Remember every element the sweep saw - even from a stale
+        // generation, the elements are real. Cross-Space rows carry none;
+        // the repaint nudge resolves theirs from this cache.
+        for item in items {
+            if let windowID = item.windowID, let element = item.axWindow {
+                WindowElements.note(element, for: windowID)
+            }
+        }
         // Cmd already released: a quick tap commits straight from here,
         // never showing the panel.
         if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
@@ -345,6 +353,11 @@ final class SwitcherController {
     }
 
     private func finishWindowsSnapshot(_ items: [WindowItem], generation: Int) {
+        for item in items {
+            if let windowID = item.windowID, let element = item.element {
+                WindowElements.note(element, for: windowID)
+            }
+        }
         if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
             let pending = pendingCommits.remove(at: pendingIndex)
             guard generation > appliedGeneration else {
