@@ -51,94 +51,26 @@ struct SettingsView: View {
     @State private var shortcuts = Config.shortcuts
     @ObservedObject private var recorder = ShortcutRecorder.shared
 
+    // Two side-by-side columns keep the window at a glanceable height;
+    // both stretch to the taller column so their backgrounds stay flush.
     var body: some View {
-        Form {
-            Section {
-                Toggle(isOn: $launchAtLogin) {
-                    Label("Launch at Login", systemImage: "power")
-                }
-                .onChange(of: launchAtLogin) { setLaunchAtLogin($0) }
-            } header: {
-                Text("General")
-            } footer: {
-                Text("A macOS login item; also listed in System Settings > General > Login Items.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 0) {
+            Form {
+                generalSection
+                switcherListSection
+                navigationSection
             }
-            Section("Switcher list") {
-                Toggle("Include hidden apps", isOn: $includeHidden)
-                Toggle("Include minimized apps", isOn: $includeMinimized)
-                Toggle("Include apps in other Spaces", isOn: $includeOtherSpaces)
-                Toggle(isOn: $includeNoWindows) {
-                    HStack(spacing: 4) {
-                        Text("Include apps with no windows")
-                        InfoDot("Lists running apps that have no windows at all. Selecting one behaves like clicking its Dock icon, so the app reopens a window.")
-                    }
-                }
+            .formStyle(.grouped)
+            .frame(width: 360)
+            .frame(maxHeight: .infinity)
+            Form {
+                shortcutsSection
+                aerospaceSection
             }
-            Section("Navigation") {
-                Toggle(isOn: $trackpadSwipe) {
-                    HStack(spacing: 4) {
-                        Text("Trackpad swipe navigation")
-                        InfoDot("Steps through Spaces instantly on the system three- or four-finger swipe instead of playing the animated transition. The system gesture must stay enabled in System Settings > Trackpad > More Gestures.")
-                    }
-                }
-                Toggle(isOn: $keyboardSpaceNav) {
-                    HStack(spacing: 4) {
-                        Text("Keyboard Space navigation")
-                        InfoDot("Steps through Spaces and workspaces with the Previous/Next Space shortcuts below. Off returns those keys to macOS immediately.")
-                    }
-                }
-            }
-            Section {
-                shortcutRow(key: "switcher",
-                            info: "Opens the switcher. Hold the shortcut's modifiers to keep the list open; a quick tap returns to the previous window. Shift reverses the direction.")
-                shortcutRow(key: "cycle-windows",
-                            info: "Cycles the windows of the frontmost app, including minimized ones and windows in other Spaces.")
-                shortcutRow(key: "previous-space",
-                            info: "Steps to the previous Space or workspace on the active display.")
-                shortcutRow(key: "next-space",
-                            info: "Steps to the next Space or workspace on the active display.")
-            } header: {
-                Text("Shortcuts")
-            } footer: {
-                Text(recorder.message
-                    ?? "Click a shortcut, then press the new keys; Esc cancels. Recording needs Cyclist enabled.")
-                    .font(.caption)
-                    .foregroundStyle(recorder.message == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
-            }
-            Section {
-                Toggle(isOn: $aerospaceIntegration) {
-                    HStack(spacing: 4) {
-                        Text("AeroSpace integration")
-                        InfoDot("Bridges to the AeroSpace tiling window manager over its socket: its workspaces join Ctrl+Left/Right navigation and windows parked in hidden workspaces get switcher rows. Requires AeroSpace running.")
-                    }
-                }
-                .onChange(of: aerospaceIntegration) { newValue in
-                    guard newValue != Config.aerospaceIntegration else { return }
-                    Config.set(section: "aerospace", key: "integration", to: newValue)
-                }
-                Toggle(isOn: $showHollowWorkspaces) {
-                    HStack(spacing: 4) {
-                        Text("Show hollow workspaces")
-                        InfoDot("A hollow workspace is one whose windows all went native-fullscreen; visiting it shows a bare desktop, so navigation skips it by default and stops on the fullscreen Spaces instead. Enable to keep those stops.")
-                    }
-                }
-                .disabled(!aerospaceIntegration)
-                .onChange(of: showHollowWorkspaces) { newValue in
-                    guard newValue != Config.showHollowWorkspaces else { return }
-                    Config.set(section: "aerospace", key: "show-hollow-workspaces", to: newValue)
-                }
-            } header: {
-                Text("AeroSpace (advanced)")
-            } footer: {
-                Text("Stored in \(Config.displayPath); hand edits apply live.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            .formStyle(.grouped)
+            .frame(width: 360)
+            .frame(maxHeight: .infinity)
         }
-        .formStyle(.grouped)
-        .frame(width: 360)
         .fixedSize()
         .onReceive(NotificationCenter.default.publisher(for: Config.didChangeNotification)) { _ in
             aerospaceIntegration = Config.aerospaceIntegration
@@ -149,6 +81,104 @@ struct SettingsView: View {
             // System Settings > General > Login Items is a second writer of
             // this state; re-read whenever the window comes up.
             launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+
+    private var generalSection: some View {
+        Section {
+            Toggle(isOn: $launchAtLogin) {
+                Label("Launch at Login", systemImage: "power")
+            }
+            .onChange(of: launchAtLogin) { setLaunchAtLogin($0) }
+        } header: {
+            Text("General")
+        } footer: {
+            Text("A macOS login item; also listed in System Settings > General > Login Items.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var switcherListSection: some View {
+        Section("Switcher list") {
+                Toggle("Include hidden apps", isOn: $includeHidden)
+                Toggle("Include minimized apps", isOn: $includeMinimized)
+                Toggle("Include apps in other Spaces", isOn: $includeOtherSpaces)
+                Toggle(isOn: $includeNoWindows) {
+                    HStack(spacing: 4) {
+                        Text("Include apps with no windows")
+                        InfoDot("Lists running apps that have no windows at all. Selecting one behaves like clicking its Dock icon, so the app reopens a window.")
+                    }
+                }
+        }
+    }
+
+    private var navigationSection: some View {
+        Section("Navigation") {
+            Toggle(isOn: $trackpadSwipe) {
+                HStack(spacing: 4) {
+                    Text("Trackpad swipe navigation")
+                    InfoDot("Steps through Spaces instantly on the system three- or four-finger swipe instead of playing the animated transition. The system gesture must stay enabled in System Settings > Trackpad > More Gestures.")
+                }
+            }
+            Toggle(isOn: $keyboardSpaceNav) {
+                HStack(spacing: 4) {
+                    Text("Keyboard Space navigation")
+                    InfoDot("Steps through Spaces and workspaces with the Previous/Next Space shortcuts. Off returns those keys to macOS immediately.")
+                }
+            }
+        }
+    }
+
+    private var shortcutsSection: some View {
+        Section {
+            shortcutRow(key: "switcher",
+                        info: "Opens the switcher. Hold the shortcut's modifiers to keep the list open; a quick tap returns to the previous window. Shift reverses the direction.")
+            shortcutRow(key: "cycle-windows",
+                        info: "Cycles the windows of the frontmost app, including minimized ones and windows in other Spaces.")
+            shortcutRow(key: "previous-space",
+                        info: "Steps to the previous Space or workspace on the active display.")
+            shortcutRow(key: "next-space",
+                        info: "Steps to the next Space or workspace on the active display.")
+        } header: {
+            Text("Shortcuts")
+        } footer: {
+            Text(recorder.message
+                ?? "Click a shortcut, then press the new keys; Esc cancels. Recording needs Cyclist enabled.")
+                .font(.caption)
+                .foregroundStyle(recorder.message == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
+        }
+    }
+
+    private var aerospaceSection: some View {
+        Section {
+            Toggle(isOn: $aerospaceIntegration) {
+                HStack(spacing: 4) {
+                    Text("AeroSpace integration")
+                    InfoDot("Bridges to the AeroSpace tiling window manager over its socket: its workspaces join Ctrl+Left/Right navigation and windows parked in hidden workspaces get switcher rows. Requires AeroSpace running.")
+                }
+            }
+            .onChange(of: aerospaceIntegration) { newValue in
+                guard newValue != Config.aerospaceIntegration else { return }
+                Config.set(section: "aerospace", key: "integration", to: newValue)
+            }
+            Toggle(isOn: $showHollowWorkspaces) {
+                HStack(spacing: 4) {
+                    Text("Show hollow workspaces")
+                    InfoDot("A hollow workspace is one whose windows all went native-fullscreen; visiting it shows a bare desktop, so navigation skips it by default and stops on the fullscreen Spaces instead. Enable to keep those stops.")
+                }
+            }
+            .disabled(!aerospaceIntegration)
+            .onChange(of: showHollowWorkspaces) { newValue in
+                guard newValue != Config.showHollowWorkspaces else { return }
+                Config.set(section: "aerospace", key: "show-hollow-workspaces", to: newValue)
+            }
+        } header: {
+            Text("AeroSpace (advanced)")
+        } footer: {
+            Text("Stored in \(Config.displayPath); hand edits apply live.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
