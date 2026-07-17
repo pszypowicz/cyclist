@@ -95,9 +95,9 @@ final class EventTap {
         return gestureTapUnsupported
     }
 
-    func stop() {
+    private func stop() {
         for tap in [keyTap, gestureTap].compactMap({ $0 }) {
-            // Clear the callback first: a deliberate teardown must not look
+            // Clear the callback first: a rebuild's teardown must not look
             // like a revocation and re-trigger recovery.
             CFMachPortSetInvalidationCallBack(tap, nil)
             CGEvent.tapEnable(tap: tap, enable: false)

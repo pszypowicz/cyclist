@@ -1,10 +1,10 @@
 import Foundation
 
-// Every setting lives in standard user defaults, so the Settings window,
-// the status menu, and `defaults write io.github.pszypowicz.Cyclist ...`
-// are all the same mechanism - external writes apply to the running app
-// via KVO (AppDelegate observes the keys with side effects; the shortcut
-// store below re-parses its own).
+// Every setting lives in standard user defaults, so the Settings window
+// and `defaults write io.github.pszypowicz.Cyclist ...` are the same
+// mechanism - external writes apply to the running app via KVO
+// (AppDelegate observes the AeroSpace key, whose flip has a side effect;
+// the shortcut store below re-parses its own).
 enum Settings {
     static let includeHiddenKey = "includeHidden"
     static let includeMinimizedKey = "includeMinimized"
@@ -85,8 +85,7 @@ final class ShortcutSettings: NSObject {
     private(set) var previousSpace: Shortcut
     private(set) var nextSpace: Shortcut
 
-    // Keyed by defaults key - what the recorder's duplicate check walks
-    // and the Settings rows render.
+    // Keyed by defaults key - what the recorder's duplicate check walks.
     var all: [String: Shortcut] {
         [
             Settings.switcherShortcutKey: switcher,
