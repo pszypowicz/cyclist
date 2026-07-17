@@ -29,11 +29,12 @@ final class SpaceNavigator {
     // Settle after a landed transition before the next post. Measured with
     // --measure-swipe-floor on macOS 26: event-gated bursts never wedge
     // the compositor at ANY gap (the historical wedge came from blind
-    // time-based posting that landed swipes mid-transition), but below
-    // ~250ms the Dock queues transitions and per-step latency balloons
-    // from ~40ms to ~500ms, so this is the fastest sustained cadence that
-    // stays predictable. A post after idle goes out immediately.
-    private let postSettleGap: TimeInterval = 0.25
+    // time-based posting that landed swipes mid-transition). Latest sweep
+    // (26.5): arrivals stay in the 15-45ms band down to a 50ms gap, with
+    // occasional ~500ms latency spikes appearing only below that - 50ms is
+    // the fastest sustained cadence that stays predictable. Re-measure
+    // after macOS updates. A post after idle goes out immediately.
+    private let postSettleGap: TimeInterval = 0.05
 
     private var target: UInt64?
     private var onArrival: (() -> Void)?

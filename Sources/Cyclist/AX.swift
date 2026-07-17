@@ -167,23 +167,29 @@ enum AX {
     // nudge after a successful one.
     static func repaintNudge(pid: pid_t, windowID: Int, element: AXUIElement? = nil, attempt: Int = 0) {
         guard attempt < 4 else { return }
-        // Resolve by window id over the raw element list - no role reads.
-        // The lookup runs against an app mid-compositing, where every AX
-        // message risks the full timeout; the blank-to-content beat the
-        // user sees is this resolution plus the retry ladder, so it must
-        // be as few messages as possible and the retries tight.
-        guard let resolved = element
+        // Resolution order: the commit's own element, then the element
+        // cache, then enumeration over the raw element list. The lookup
+        // runs against an app mid-compositing, where every AX message
+        // risks the full timeout, so the enumeration is the last resort -
+        // and late attempts skip the cache in case its entry is stale
+        // (a missed destroy event), forcing one fresh enumeration.
+        let cached = attempt < 2 ? WindowElements.element(for: windowID) : nil
+        let candidate = element ?? cached
+        let via = element != nil ? "passed" : (cached != nil ? "cached" : "listed")
+        guard let resolved = candidate
                 ?? rawWindows(pid: pid).first(where: { self.windowID(of: $0) == windowID }),
               let origin = position(resolved) else {
-            // Re-resolve from scratch next time: a passed element that
-            // refuses a position read may be stale.
-            Log.debug("nudge: wid=\(windowID) attempt=\(attempt) unresolved")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            // Re-resolve next time: a passed element that refuses a
+            // position read may be stale.
+            Log.debug("nudge: wid=\(windowID) attempt=\(attempt) unresolved via=\(via)")
+            // With the cache, a retry costs one position read on a known
+            // element - cheap enough to poll tightly while the app drains.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
                 repaintNudge(pid: pid, windowID: windowID, attempt: attempt + 1)
             }
             return
         }
-        Log.debug("nudge: wid=\(windowID) attempt=\(attempt) applied")
+        Log.debug("nudge: wid=\(windowID) attempt=\(attempt) applied via=\(via)")
         setPosition(resolved, CGPoint(x: origin.x + 1, y: origin.y))
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
             setPosition(resolved, origin)
