@@ -161,7 +161,7 @@ struct SettingsView: View {
             Text("Shortcuts")
         } footer: {
             Text(recorder.message
-                ?? "Click a shortcut, then press the new keys; Esc cancels. Recording needs Cyclist enabled.")
+                ?? "Click a shortcut, then press the new keys; Esc cancels.")
                 .font(.caption)
                 .foregroundStyle(recorder.message == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
         }

@@ -12,7 +12,6 @@ enum Settings {
     static let includeNoWindowsKey = "includeNoWindows"
     static let trackpadSwipeKey = "trackpadSwipe"
     static let keyboardSpaceNavKey = "keyboardSpaceNavigation"
-    static let enabledKey = "enabled"
     static let aerospaceIntegrationKey = "aerospaceIntegration"
     static let showHollowWorkspacesKey = "showHollowWorkspaces"
     static let switcherShortcutKey = "switcherShortcut"
@@ -28,7 +27,6 @@ enum Settings {
             includeNoWindowsKey: false,
             trackpadSwipeKey: true,
             keyboardSpaceNavKey: true,
-            enabledKey: true,
             aerospaceIntegrationKey: false,
             showHollowWorkspacesKey: false,
             switcherShortcutKey: "cmd+tab",
@@ -60,10 +58,6 @@ enum Settings {
 
     static var keyboardSpaceNav: Bool {
         UserDefaults.standard.bool(forKey: keyboardSpaceNavKey)
-    }
-
-    static var enabled: Bool {
-        UserDefaults.standard.bool(forKey: enabledKey)
     }
 
     static var aerospaceIntegration: Bool {

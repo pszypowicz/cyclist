@@ -23,15 +23,15 @@ final class ShortcutRecorder: ObservableObject {
     var isRecording: Bool { recordingKey != nil }
 
     // Clicking the active row again cancels, so a recording started while
-    // the tap is down (Cyclist disabled) can always be backed out of.
+    // the tap is down (Accessibility revoked) can always be backed out of.
     func begin(key: String) {
         message = nil
         recordingKey = recordingKey == key ? nil : key
     }
 
-    // Also called when the Settings window closes or resigns key and when
-    // the taps tear down: an armed recording swallows every keyDown
-    // system-wide, so it must not outlive the UI that shows it.
+    // Also called when the Settings window closes or resigns key: an armed
+    // recording swallows every keyDown system-wide, so it must not outlive
+    // the UI that shows it.
     func cancel() {
         recordingKey = nil
     }

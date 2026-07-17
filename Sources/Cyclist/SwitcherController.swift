@@ -93,21 +93,6 @@ final class SwitcherController {
         tap.start()
     }
 
-    // Tears down the event taps (the menu's Enabled switch turned off):
-    // every hook releases and the native shortcuts work again immediately.
-    // The owner keeps the trackers and the AeroSpace client running, so a
-    // later start() resumes with fresh MRU order; only in-flight UI and
-    // navigation are dropped here.
-    func stop() {
-        cancel()
-        // With the tap down nothing can feed or Esc-cancel a recording, and
-        // a leftover one would swallow the first keypress after re-enable.
-        ShortcutRecorder.shared.cancel()
-        navigator.cancel()
-        chain.cancelPending()
-        tap.stop()
-    }
-
     private func handleKeyDown(_ event: CGEvent) -> Bool {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags

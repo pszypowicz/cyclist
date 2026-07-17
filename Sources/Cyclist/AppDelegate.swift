@@ -8,9 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var recency: WindowFocusTracker!
     private var controller: SwitcherController!
     private var permissionTimer: Timer?
-    // Last applied values: defaults KVO fires on every write, including
+    // Last applied value: defaults KVO fires on every write, including
     // same-value ones, and start/stop must not run twice.
-    private var enabledApplied = false
     private var aerospaceApplied = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -29,18 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wsEvents.start()
         controller.onTapInvalidated = { [weak self] in self?.scheduleRecovery() }
         statusItem.setUp()
-        // Enabled and the AeroSpace integration apply through defaults KVO,
-        // so the menu toggle and `defaults write` are the same mechanism
-        // and external writes take effect immediately.
-        for key in [Settings.enabledKey, Settings.aerospaceIntegrationKey] {
-            UserDefaults.standard.addObserver(self, forKeyPath: key, options: [], context: nil)
-        }
-        enabledApplied = Settings.enabled
-        if enabledApplied {
-            ensurePermissionAndStart()
-        } else {
-            Log.write("startup: disabled by setting; hooks not installed")
-        }
+        // The AeroSpace integration applies through defaults KVO, so the
+        // Settings toggle and `defaults write` are the same mechanism and
+        // external writes take effect immediately.
+        UserDefaults.standard.addObserver(
+            self, forKeyPath: Settings.aerospaceIntegrationKey, options: [], context: nil)
+        ensurePermissionAndStart()
         // Optional: unlocks live titles for windows in other Spaces via
         // CGWindowList. Used solely to read titles; Cyclist never captures
         // window contents. Without it, last-seen titles are used instead.
@@ -55,28 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
         // KVO from an external `defaults write` can arrive off-main.
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.applyEnabled()
-            self.applyAerospace()
-        }
-    }
-
-    // Disabled means the taps are down and every shortcut is native again;
-    // the trackers and the AeroSpace client keep running so a re-enable
-    // resumes with fresh MRU order.
-    private func applyEnabled() {
-        let enabled = Settings.enabled
-        guard enabled != enabledApplied else { return }
-        enabledApplied = enabled
-        statusItem.refreshEnabled()
-        if enabled {
-            Log.write("enabled; installing hooks")
-            ensurePermissionAndStart()
-        } else {
-            Log.write("disabled; native behavior until re-enabled")
-            permissionTimer?.invalidate()
-            permissionTimer = nil
-            controller.stop()
+            self?.applyAerospace()
         }
     }
 
@@ -123,9 +95,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // a runtime revocation invalidated the tap) and the tap is rebuilt. Also
     // covers tap creation failing while trusted, e.g. a stale TCC entry.
     private func scheduleRecovery() {
-        // A tap-invalidation callback queued just before a disable must not
-        // restart polling against the user's choice.
-        guard Settings.enabled else { return }
         guard permissionTimer == nil else { return }
         Log.write("event tap down or Accessibility not granted; polling to rebuild")
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in

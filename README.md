@@ -81,11 +81,11 @@ open /Applications/Cyclist.app
 
 The build script signs with your "Apple Development" certificate when one is present so the Accessibility grant survives rebuilds. See `scripts/build-app.sh --help` for options.
 
-On first launch Cyclist prompts for Accessibility permission and activates itself once granted. It lives in the menu bar (no Dock icon); the menu holds an Enabled switch (turns every hook off, the icon dims, and the native shortcuts work again immediately), Settings, About, and Quit. The Settings window holds the list options, trackpad swipe navigation, and a native Launch at Login toggle (registers with System Settings > General > Login Items).
+On first launch Cyclist prompts for Accessibility permission and activates itself once granted. It lives in the menu bar (no Dock icon); the menu holds Settings, About, and Quit - quitting is how every hook releases and the native shortcuts return. The Settings window holds the list options, trackpad swipe navigation, and a native Launch at Login toggle (registers with System Settings > General > Login Items).
 
 ## Configuration
 
-Every setting lives in standard user defaults under the `io.github.pszypowicz.Cyclist` domain - the Settings window, the menu's Enabled switch, and `defaults write` are the same mechanism, and external writes apply to a running Cyclist immediately:
+Every setting lives in standard user defaults under the `io.github.pszypowicz.Cyclist` domain - the Settings window and `defaults write` are the same mechanism, and external writes apply to a running Cyclist immediately:
 
 ```sh
 defaults write io.github.pszypowicz.Cyclist aerospaceIntegration -bool true
@@ -94,7 +94,6 @@ defaults write io.github.pszypowicz.Cyclist switcherShortcut "alt+tab"
 
 | Key                       | Type   | Default        |
 | ------------------------- | ------ | -------------- |
-| `enabled`                 | bool   | `true`         |
 | `includeHidden`           | bool   | `true`         |
 | `includeMinimized`        | bool   | `true`         |
 | `includeOtherSpaces`      | bool   | `true`         |
@@ -112,13 +111,13 @@ Shortcut strings are modifiers and a key joined with `+`: `cmd`, `alt`, `ctrl`, 
 
 ## Known limitations
 
-- Cyclist consumes the Previous/Next Space shortcuts (Ctrl+Left/Right by default) for chain navigation; disable the equivalent Mission Control shortcuts if you do not want both meanings, or turn off "Keyboard Space navigation" in Settings. The menu's Enabled switch (or quitting Cyclist) brings the native behavior back.
+- Cyclist consumes the Previous/Next Space shortcuts (Ctrl+Left/Right by default) for chain navigation; disable the equivalent Mission Control shortcuts if you do not want both meanings, or turn off "Keyboard Space navigation" in Settings. Quitting Cyclist brings the native behavior back.
 - Cyclist also consumes the trackpad Spaces-swipe gesture while "Trackpad swipe navigation" is on; flip the Settings toggle to get the native animated swipe back without quitting. One swipe is one step - a long swipe does not scrub across several Spaces.
 - While a password field has secure input enabled, macOS withholds keystrokes from event taps, so Cmd+Tab temporarily falls through to the native switcher.
 - Same-app window rows for other Spaces rely on the window-server list; their titles need Screen Recording permission or a previous sighting of the window (same rule as the app switcher's other-Space rows).
 - The AeroSpace bridge speaks the server's socket protocol (version 1) and tracks the workspaces of AeroSpace's focused monitor. With several native desktops the ring only expands the current one.
 - The list is keyboard-only; the panel ignores mouse clicks.
-- Recording a shortcut needs Cyclist enabled - the recorder captures through the same event tap the shortcuts use.
+- Recording a shortcut captures through the same event tap the shortcuts use, so it needs the Accessibility grant.
 
 ## Acknowledgements
 
