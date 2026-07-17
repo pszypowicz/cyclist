@@ -33,9 +33,10 @@ final class MRUTracker {
         // By activation time the app's windows are AX-visible even when the
         // activation came from arriving in a fullscreen Space, where the
         // navigator's own arrival harvest still races AX exposure. Only the
-        // activated app is swept: this runs on the main thread on every app
-        // switch, and a full-Space sweep here could stall the run loop that
-        // services the key tap (the full sweep stays on Space arrival).
+        // activated app is swept: the sweep runs on the snapshot queue, but
+        // a full-Space sweep on every app switch would still delay the
+        // switcher's own snapshots there (the full sweep stays on Space
+        // arrival).
         AppListProvider.harvestTitles(pids: [app.processIdentifier])
     }
 
