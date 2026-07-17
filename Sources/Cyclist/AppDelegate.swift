@@ -27,12 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start delivering only after every consumer has wired its callbacks.
         wsEvents.start()
         controller.onTapInvalidated = { [weak self] in self?.scheduleRecovery() }
-        statusItem.setUp()
-        // The AeroSpace integration applies through defaults KVO, so the
-        // Settings toggle and `defaults write` are the same mechanism and
-        // external writes take effect immediately.
-        UserDefaults.standard.addObserver(
-            self, forKeyPath: Settings.aerospaceIntegrationKey, options: [], context: nil)
+        statusItem.refresh()
+        // The AeroSpace integration and the menu bar icon apply through
+        // defaults KVO, so the Settings toggles and `defaults write` are
+        // the same mechanism and external writes take effect immediately.
+        for key in [Settings.aerospaceIntegrationKey, Settings.showMenuBarIconKey] {
+            UserDefaults.standard.addObserver(self, forKeyPath: key, options: [], context: nil)
+        }
         ensurePermissionAndStart()
         // Optional: unlocks live titles for windows in other Spaces via
         // CGWindowList. Used solely to read titles; Cyclist never captures
@@ -48,8 +49,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
         // KVO from an external `defaults write` can arrive off-main.
         DispatchQueue.main.async { [weak self] in
-            self?.applyAerospace()
+            guard let self else { return }
+            self.applyAerospace()
+            self.statusItem.refresh()
         }
+    }
+
+    // Reopening the app (Finder double-click, `open -a Cyclist`) presents
+    // Settings - the universal "where did it go" gesture, and the escape
+    // hatch when the menu bar icon is hidden.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        SettingsView.showWindow()
+        return false
     }
 
     private func applyAerospace() {
