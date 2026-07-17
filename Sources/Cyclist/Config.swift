@@ -6,12 +6,12 @@ import AppKit
 //   ${XDG_CONFIG_HOME:-~/.config}/cyclist/cyclist.toml
 //
 // The accepted grammar is a TOML subset: `[section]` headers,
-// `key = true|false` lines, and `#` comments. Unreadable lines and
-// unknown keys are logged at default level and skipped - a typo must
-// surface, not silently revert a setting to its default. The Settings
-// window writes through set(_:key:to:), a surgical line edit that leaves
-// every other byte of the file alone, so hand-written comments and
-// formatting are safe.
+// `key = true|false` and `key = "string"` lines, and `#` comments.
+// Unreadable lines and unknown keys are logged at default level and
+// skipped - a typo must surface, not silently revert a setting to its
+// default. The Settings window writes through set(_:key:to:), a surgical
+// line edit that leaves every other byte of the file alone, so
+// hand-written comments and formatting are safe.
 //
 // Edits apply live: dispatch sources watch the cyclist directory (the
 // directory, not the file, so editors that save by rename-and-replace
@@ -26,12 +26,31 @@ enum Config {
     struct Values: Equatable {
         var aerospaceIntegration = false
         var showHollowWorkspaces = false
+        var switcherShortcut = Shortcut(keyCode: 48, modifiers: .command)       // cmd+tab
+        var cycleWindowsShortcut = Shortcut(keyCode: 50, modifiers: .command)   // cmd+backtick
+        var previousSpaceShortcut = Shortcut(keyCode: 123, modifiers: .control) // ctrl+left
+        var nextSpaceShortcut = Shortcut(keyCode: 124, modifiers: .control)     // ctrl+right
     }
 
     private(set) static var values = Values()
 
     static var aerospaceIntegration: Bool { values.aerospaceIntegration }
     static var showHollowWorkspaces: Bool { values.showHollowWorkspaces }
+    static var switcherShortcut: Shortcut { values.switcherShortcut }
+    static var cycleWindowsShortcut: Shortcut { values.cycleWindowsShortcut }
+    static var previousSpaceShortcut: Shortcut { values.previousSpaceShortcut }
+    static var nextSpaceShortcut: Shortcut { values.nextSpaceShortcut }
+
+    // The [shortcuts] bindings by their config key - what the recorder
+    // checks for duplicates and the Settings rows render.
+    static var shortcuts: [String: Shortcut] {
+        [
+            "switcher": values.switcherShortcut,
+            "cycle-windows": values.cycleWindowsShortcut,
+            "previous-space": values.previousSpaceShortcut,
+            "next-space": values.nextSpaceShortcut,
+        ]
+    }
 
     // Posted after values change, whatever the writer (hand edit or the
     // Settings window); the Settings window resyncs its toggles on it.
@@ -120,10 +139,18 @@ enum Config {
     // on the symlink path itself would replace the link with a plain file.
     // The change is applied by the reload path, same as a hand edit.
     static func set(section: String, key: String, to value: Bool) {
+        write(section: section, key: key, valueText: String(value))
+    }
+
+    static func set(section: String, key: String, to value: String) {
+        write(section: section, key: key, valueText: "\"\(value)\"")
+    }
+
+    private static func write(section: String, key: String, valueText: String) {
         let text = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? template
         do {
             try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-            try rewriting(text, section: section, key: key, value: value)
+            try rewriting(text, section: section, key: key, valueText: valueText)
                 .write(to: fileURL.resolvingSymlinksInPath(), atomically: true, encoding: .utf8)
         } catch {
             Log.write("config: write failed for \(section).\(key): \(error)")
@@ -134,7 +161,7 @@ enum Config {
         scheduleReload()
     }
 
-    private static func rewriting(_ text: String, section: String, key: String, value: Bool) -> String {
+    private static func rewriting(_ text: String, section: String, key: String, valueText: String) -> String {
         var lines = text.components(separatedBy: "\n")
         var current = ""
         var insertAt: Int?
@@ -152,18 +179,18 @@ enum Config {
             guard parts.count == 2,
                   parts[0].trimmingCharacters(in: .whitespaces) == key else { continue }
             let comment = raw.firstIndex(of: "#").map { String(raw[$0...]) }
-            lines[index] = "\(key) = \(value)" + (comment.map { " \($0)" } ?? "")
+            lines[index] = "\(key) = \(valueText)" + (comment.map { " \($0)" } ?? "")
             return lines.joined(separator: "\n")
         }
         if let insertAt {
-            lines.insert("\(key) = \(value)", at: insertAt)
+            lines.insert("\(key) = \(valueText)", at: insertAt)
         } else {
             while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
                 lines.removeLast()
             }
             if !lines.isEmpty { lines.append("") }
             lines.append("[\(section)]")
-            lines.append("\(key) = \(value)")
+            lines.append("\(key) = \(valueText)")
             lines.append("")
         }
         return lines.joined(separator: "\n")
@@ -172,6 +199,15 @@ enum Config {
     // Seed for the first Settings-window write when no file exists yet;
     // mirrors the README example so the created file documents itself.
     private static let template = """
+        [shortcuts]
+        # Modifiers and a key joined with "+": cmd, alt, ctrl, shift plus a key
+        # name (tab, backtick, left, right, up, down, space, return, a letter,
+        # a digit, ...). Defaults below.
+        switcher = "cmd+tab"
+        cycle-windows = "cmd+backtick"
+        previous-space = "ctrl+left"
+        next-space = "ctrl+right"
+
         [aerospace]
         # The AeroSpace bridge (socket client). Default: false.
         integration = false
@@ -211,27 +247,54 @@ enum Config {
                 continue
             }
             let parts = line.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2,
-                  let value = Bool(parts[1].trimmingCharacters(in: .whitespaces)) else {
+            guard parts.count == 2 else {
                 Log.write("config: \(fileURL.lastPathComponent):\(index + 1) unreadable: \(line)")
                 continue
             }
             let key = parts[0].trimmingCharacters(in: .whitespaces)
-            switch section.isEmpty ? key : "\(section).\(key)" {
-            case "aerospace.integration":
-                result.aerospaceIntegration = value
-            case "aerospace.show-hollow-workspaces":
-                result.showHollowWorkspaces = value
+            let valueText = parts[1].trimmingCharacters(in: .whitespaces)
+            let fullKey = section.isEmpty ? key : "\(section).\(key)"
+            switch fullKey {
+            case "aerospace.integration", "aerospace.show-hollow-workspaces":
+                guard let value = Bool(valueText) else {
+                    Log.write("config: \(fileURL.lastPathComponent):\(index + 1) unreadable: \(line)")
+                    continue
+                }
+                if fullKey == "aerospace.integration" {
+                    result.aerospaceIntegration = value
+                } else {
+                    result.showHollowWorkspaces = value
+                }
+            case "shortcuts.switcher", "shortcuts.cycle-windows",
+                 "shortcuts.previous-space", "shortcuts.next-space":
+                guard let shortcut = Shortcut.parse(unquoted(valueText)) else {
+                    Log.write("config: \(fileURL.lastPathComponent):\(index + 1) unreadable: \(line)")
+                    continue
+                }
+                switch fullKey {
+                case "shortcuts.switcher": result.switcherShortcut = shortcut
+                case "shortcuts.cycle-windows": result.cycleWindowsShortcut = shortcut
+                case "shortcuts.previous-space": result.previousSpaceShortcut = shortcut
+                default: result.nextSpaceShortcut = shortcut
+                }
             default:
-                Log.write("config: \(fileURL.lastPathComponent):\(index + 1) unknown key: "
-                    + (section.isEmpty ? key : "\(section).\(key)"))
+                Log.write("config: \(fileURL.lastPathComponent):\(index + 1) unknown key: \(fullKey)")
             }
         }
         return result
     }
 
+    private static func unquoted(_ text: String) -> String {
+        guard text.count >= 2, text.hasPrefix("\""), text.hasSuffix("\"") else { return text }
+        return String(text.dropFirst().dropLast())
+    }
+
     private static func describe(_ values: Values) -> String {
         "aerospace.integration=\(values.aerospaceIntegration)"
             + " aerospace.show-hollow-workspaces=\(values.showHollowWorkspaces)"
+            + " shortcuts=\(values.switcherShortcut.configString)"
+            + ",\(values.cycleWindowsShortcut.configString)"
+            + ",\(values.previousSpaceShortcut.configString)"
+            + ",\(values.nextSpaceShortcut.configString)"
     }
 }

@@ -44,9 +44,12 @@ struct SettingsView: View {
     @AppStorage(Settings.includeOtherSpacesKey) private var includeOtherSpaces = true
     @AppStorage(Settings.includeNoWindowsKey) private var includeNoWindows = false
     @AppStorage(Settings.trackpadSwipeKey) private var trackpadSwipe = true
+    @AppStorage(Settings.keyboardSpaceNavKey) private var keyboardSpaceNav = true
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var aerospaceIntegration = Config.aerospaceIntegration
     @State private var showHollowWorkspaces = Config.showHollowWorkspaces
+    @State private var shortcuts = Config.shortcuts
+    @ObservedObject private var recorder = ShortcutRecorder.shared
 
     var body: some View {
         Form {
@@ -80,6 +83,29 @@ struct SettingsView: View {
                         InfoDot("Steps through Spaces instantly on the system three- or four-finger swipe instead of playing the animated transition. The system gesture must stay enabled in System Settings > Trackpad > More Gestures.")
                     }
                 }
+                Toggle(isOn: $keyboardSpaceNav) {
+                    HStack(spacing: 4) {
+                        Text("Keyboard Space navigation")
+                        InfoDot("Steps through Spaces and workspaces with the Previous/Next Space shortcuts below. Off returns those keys to macOS immediately.")
+                    }
+                }
+            }
+            Section {
+                shortcutRow(key: "switcher",
+                            info: "Opens the switcher. Hold the shortcut's modifiers to keep the list open; a quick tap returns to the previous window. Shift reverses the direction.")
+                shortcutRow(key: "cycle-windows",
+                            info: "Cycles the windows of the frontmost app, including minimized ones and windows in other Spaces.")
+                shortcutRow(key: "previous-space",
+                            info: "Steps to the previous Space or workspace on the active display.")
+                shortcutRow(key: "next-space",
+                            info: "Steps to the next Space or workspace on the active display.")
+            } header: {
+                Text("Shortcuts")
+            } footer: {
+                Text(recorder.message
+                    ?? "Click a shortcut, then press the new keys; Esc cancels. Recording needs Cyclist enabled.")
+                    .font(.caption)
+                    .foregroundStyle(recorder.message == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
             }
             Section {
                 Toggle(isOn: $aerospaceIntegration) {
@@ -117,11 +143,24 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: Config.didChangeNotification)) { _ in
             aerospaceIntegration = Config.aerospaceIntegration
             showHollowWorkspaces = Config.showHollowWorkspaces
+            shortcuts = Config.shortcuts
         }
         .onAppear {
             // System Settings > General > Login Items is a second writer of
             // this state; re-read whenever the window comes up.
             launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+
+    private func shortcutRow(key: String, info: String) -> some View {
+        HStack(spacing: 4) {
+            Text(ShortcutRecorder.labels[key] ?? key)
+            InfoDot(info)
+            Spacer()
+            Button(recorder.recordingKey == key ? "Press keys…" : (shortcuts[key]?.display ?? "?")) {
+                recorder.begin(key: key)
+            }
+            .buttonStyle(.bordered)
         }
     }
 
