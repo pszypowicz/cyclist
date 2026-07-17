@@ -68,6 +68,11 @@ final class AeroSpaceClient {
         return visibleWorkspaces.contains(workspace) ? nil : workspace
     }
 
+    // Window IDs AeroSpace assigns to a workspace, visible or hidden alike.
+    func windowIDs(inWorkspace name: String) -> [Int] {
+        windowWorkspace.compactMap { $0.value == name ? $0.key : nil }
+    }
+
     // MARK: - lifecycle
 
     func start() {

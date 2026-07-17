@@ -19,7 +19,8 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 - Windows in other Spaces (including native fullscreen) get their own rows too. With Screen Recording permission granted their titles are live; without it, each row shows the last title Cyclist saw while that window was visible. Selecting a row jumps straight to that Space.
 - A separate binding (Cmd+`) cycles through the windows of the frontmost app in most-recently-used order, including minimized ones and windows in other Spaces (native fullscreen included) - things the native window cycler skips. A quick tap bounces between the app's last two windows.
 - Ctrl+Left/Right walks the native Spaces of the active display (the one holding the menu bar) in Mission Control order - user desktops and fullscreen Spaces alike - instantly and without animation. Arriving on a desktop focuses its top window, so leaving a fullscreen app always lands somewhere concrete.
-- With [AeroSpace](https://github.com/nikitabobko/AeroSpace) running, its workspaces join that ring in place of the desktop hosting them, so Ctrl+Left/Right walks `workspace 1 ... workspace N, fullscreen Spaces` seamlessly - workspace steps go over AeroSpace's socket, and crossing from a fullscreen Space lands on the ring-adjacent workspace. Windows parked in hidden workspaces appear in the switcher as `workspace N` rows; selecting one switches there. Detection is automatic and everything falls back to plain native behavior the moment AeroSpace is absent, disabled, or the menu-bar toggle is off.
+- The trackpad's Spaces swipe (three or four fingers, per System Settings > Trackpad > More Gestures) drives that same navigation: Cyclist intercepts the gesture before the Dock sees it and steps instantly instead of playing the animated transition. The system gesture must stay **enabled** - it is what makes macOS emit the gesture events at all. A menu-bar toggle ("Trackpad swipe navigation") hands the gesture back to macOS at any time.
+- With [AeroSpace](https://github.com/nikitabobko/AeroSpace) running, its workspaces join that ring in place of the desktop hosting them, so Ctrl+Left/Right walks `workspace 1 ... workspace N, fullscreen Spaces` seamlessly - workspace steps go over AeroSpace's socket, and crossing from a fullscreen Space lands on the ring-adjacent workspace. Windows parked in hidden workspaces appear in the switcher as `workspace N` rows; selecting one switches there. A workspace whose windows all went native-fullscreen is hollow - its windows display on their own Spaces and visiting it shows a bare desktop - so the ring skips it by default and the fullscreen Space itself is the stop; `show-hollow-workspaces = true` in the config file restores those stops. The integration is opt-in (`integration = true` under `[aerospace]` in the config file) and everything falls back to plain native behavior the moment AeroSpace is absent or disabled.
 - Four independent settings control what shows up in the list:
   - include **hidden** apps (Cmd+H)
   - include **minimized** apps (all windows in the Dock)
@@ -40,6 +41,7 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 | Esc (while open)    | Cancel                                        |
 | Release Cmd         | Switch to the selected item                   |
 | Ctrl+Left / Right   | Previous / next workspace or fullscreen Space |
+| Trackpad swipe      | Previous / next workspace or fullscreen Space |
 
 Quit and Close keep the list open: the affected rows leave and the selection moves to a neighbor.
 
@@ -69,11 +71,35 @@ open /Applications/Cyclist.app
 
 The build script signs with your "Apple Development" certificate when one is present so the Accessibility grant survives rebuilds. See `scripts/build-app.sh --help` for options.
 
-On first launch Cyclist prompts for Accessibility permission and activates itself once granted. It lives in the menu bar (no Dock icon); the menu holds the list settings, a native Launch at Login toggle (registers with System Settings > General > Login Items), and Quit.
+On first launch Cyclist prompts for Accessibility permission and activates itself once granted. It lives in the menu bar (no Dock icon); the menu holds an Enabled switch (turns every hook off, the icon dims, and the native shortcuts work again immediately), the list settings, a native Launch at Login toggle (registers with System Settings > General > Login Items), and Quit.
+
+## Configuration
+
+The menu covers the day-to-day switches. The AeroSpace-related settings live in a config file instead, where dotfiles can own them:
+
+```
+${XDG_CONFIG_HOME:-~/.config}/cyclist/cyclist.toml
+```
+
+```toml
+[aerospace]
+# The AeroSpace bridge (socket client). Default: false.
+integration = true
+
+# Keep chain stops for workspaces whose windows all went native-fullscreen.
+# Default: false.
+show-hollow-workspaces = false
+```
+
+- The accepted grammar is a TOML subset: `[section]` headers, `key = true|false` lines, and `#` comments. Unreadable lines and unknown keys are logged and skipped.
+- A missing file (or key) means the defaults above. Cyclist never writes the file.
+- Edits apply live when the `cyclist` directory existed at app start; a directory created later needs an app restart.
+- `XDG_CONFIG_HOME` is honored when the app's environment carries it (absolute paths only, per the XDG spec). GUI launches usually don't - launchd provides the environment, not the shell - so `~/.config` is the effective location.
 
 ## Known limitations
 
-- Cyclist consumes Ctrl+Left/Right for chain navigation; disable the equivalent Mission Control shortcuts if you do not want both meanings, and quit Cyclist to get the native behavior back.
+- Cyclist consumes Ctrl+Left/Right for chain navigation; disable the equivalent Mission Control shortcuts if you do not want both meanings. The menu's Enabled switch (or quitting Cyclist) brings the native behavior back.
+- Cyclist also consumes the trackpad Spaces-swipe gesture while "Trackpad swipe navigation" is on; flip the menu toggle to get the native animated swipe back without quitting. One swipe is one step - a long swipe does not scrub across several Spaces.
 - While a password field has secure input enabled, macOS withholds keystrokes from event taps, so Cmd+Tab temporarily falls through to the native switcher.
 - Same-app window rows for other Spaces rely on the window-server list; their titles need Screen Recording permission or a previous sighting of the window (same rule as the app switcher's other-Space rows).
 - The AeroSpace bridge speaks the server's socket protocol (version 1) and tracks the workspaces of AeroSpace's focused monitor. With several native desktops the ring only expands the current one.

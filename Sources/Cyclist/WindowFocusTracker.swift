@@ -8,8 +8,8 @@ import AppKit
 //   - the WindowServer focus stream (WindowServerFocus): the window server
 //     announces every real focus change no matter how busy the app is or
 //     how broken its Accessibility tree may be,
-//   - the switcher's own commit paths, whose target is known before any
-//     event arrives,
+//   - the switcher's commit paths and the chain's arrival focus, whose
+//     targets are known before any event arrives,
 //   - a z-order seed at launch, so ordering is sane before events accrue.
 // In-memory only: recency loses its value within minutes and window ids
 // recycle across reboots, so persistence would buy nothing.
@@ -21,6 +21,21 @@ import AppKit
 // so a genuine post-storm focus of the same window still counts. Cyclist's
 // own commits pre-install the snapshot, because the storm can beat the
 // activation notification.
+//
+// Two intake filters keep machine-generated raises out of the ranking:
+//   - While SpaceNavigator drives a transition (begin to verified arrival
+//     plus a settle tail) nothing from the event stream records. The
+//     transition raises companion chrome and the windows of transited
+//     fullscreen Spaces - same-app noise the frontmost guard cannot
+//     reject (observed: committing into a fullscreen video ranked the
+//     OTHER fullscreen Safari window above the origin window, so the
+//     next quick tap went there instead of back). Commit and chain
+//     arrival paths rank their targets explicitly; a genuine focus
+//     landing inside the tail stays unranked until its next focus.
+//   - Events for windows that fail the realness predicate (companion
+//     strips, transition backdrops) are dropped outright: they can never
+//     be rows, and recording one burns the storm's genuine-focus slot or
+//     the activation backfill.
 final class WindowFocusTracker {
     // windowID -> monotonic focus sequence; higher = more recent.
     private var sequence: [Int: UInt64] = [:]
@@ -32,6 +47,23 @@ final class WindowFocusTracker {
     // follows (it lags the event stream), the rejection was the real focus
     // of a cross-app switch and gets backfilled.
     private var lastRejected: (windowID: Int, pid: pid_t, at: Date)?
+
+    private var navigationActive = false
+    private var suppressTailUntil = Date.distantPast
+    // Transition noise keeps arriving briefly after the bookkeeping flips
+    // (observed up to ~200ms past verified arrival).
+    private let suppressTail: TimeInterval = 0.5
+
+    private var suppressing: Bool { navigationActive || suppressTailUntil > Date() }
+
+    func navigationBegan() {
+        navigationActive = true
+    }
+
+    func navigationSettled() {
+        navigationActive = false
+        suppressTailUntil = Date().addingTimeInterval(suppressTail)
+    }
 
     // The stream is shared (SpaceNavigator consumes its Space events) and
     // started by the owner once every consumer has wired its callbacks.
@@ -54,7 +86,9 @@ final class WindowFocusTracker {
         // (a window created in the background mis-ranks briefly and the
         // next real focus corrects it).
         events.onCreated = { [weak self] windowID in
-            self?.noteFocus(windowID: windowID, source: "created")
+            guard let self, !self.suppressing,
+                  CGWindows.realOwner(of: windowID)?.isReal == true else { return }
+            self.noteFocus(windowID: windowID, source: "created")
         }
         events.onDestroyed = { [weak self] windowID in
             self?.sequence.removeValue(forKey: windowID)
@@ -89,8 +123,9 @@ final class WindowFocusTracker {
         installStorm(pid: pid)
         // A focus event for this app that arrived before the activation
         // notification was rejected by the frontmost guard; it was the
-        // real focus of this very activation.
-        if let rejected = lastRejected, rejected.pid == pid,
+        // real focus of this very activation. Not during a self-driven
+        // transition: there the commit already ranked the true target.
+        if let rejected = lastRejected, rejected.pid == pid, !suppressing,
            Date().timeIntervalSince(rejected.at) < 1 {
             if var storm, storm.pid == pid {
                 storm.windowIDs.remove(rejected.windowID)
@@ -118,6 +153,14 @@ final class WindowFocusTracker {
     }
 
     private func handleFocus(_ windowID: Int) {
+        if suppressing {
+            Log.debug("recency: wid=\(windowID) suppressed (navigation)")
+            return
+        }
+        guard let (pid, isReal) = CGWindows.realOwner(of: windowID), isReal else {
+            Log.debug("recency: wid=\(windowID) ignored (unreal or gone)")
+            return
+        }
         if var storm, storm.until > Date(), storm.windowIDs.contains(windowID) {
             storm.windowIDs.remove(windowID)
             if storm.sawFocus {
@@ -137,8 +180,7 @@ final class WindowFocusTracker {
         // current window (observed as a first Cmd+Tab that re-commits the
         // window already held). A genuine cross-app focus rejected here is
         // backfilled when its activation notification lands.
-        if let pid = CGWindows.owner(of: windowID),
-           pid != NSWorkspace.shared.frontmostApplication?.processIdentifier {
+        if pid != NSWorkspace.shared.frontmostApplication?.processIdentifier {
             lastRejected = (windowID, pid, Date())
             Log.debug("recency: wid=\(windowID) raise rejected (pid \(pid) not frontmost)")
             return

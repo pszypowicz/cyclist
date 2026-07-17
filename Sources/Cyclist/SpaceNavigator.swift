@@ -55,7 +55,13 @@ final class SpaceNavigator {
     // navigation is already headed instead of the (stale) current Space.
     var pendingTarget: UInt64? { target }
 
-    init(events: WindowServerEvents) {
+    // Navigations mark themselves on the focus tracker: the transition's
+    // focus-shaped raises (companion chrome, transited fullscreen Spaces)
+    // are machine noise that must not advance recency ranks.
+    private let recency: WindowFocusTracker
+
+    init(events: WindowServerEvents, recency: WindowFocusTracker) {
+        self.recency = recency
         events.onSpaceChanged = { [weak self] spaceID in
             guard let self, self.target != nil else { return }
             Log.debug("navigator: woken by ws space event (\(spaceID))")
@@ -75,6 +81,7 @@ final class SpaceNavigator {
             Log.debug("navigator: replacing in-flight target \(replaced) with \(spaceID)")
         }
         cancel()
+        recency.navigationBegan()
         target = spaceID
         self.onArrival = onArrival
         inFlightChecks = 0
@@ -83,6 +90,12 @@ final class SpaceNavigator {
     }
 
     func cancel() {
+        // Only a navigation actually in flight settles the suppression;
+        // the defensive cancels sprinkled through commit paths must not
+        // open spurious suppression tails.
+        if target != nil {
+            recency.navigationSettled()
+        }
         stepWork?.cancel()
         stepWork = nil
         target = nil

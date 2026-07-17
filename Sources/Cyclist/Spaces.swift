@@ -164,7 +164,7 @@ enum Spaces {
     // bit 0x1 (or the 0x2 + 0x80000000 combination) alongside attribute
     // bit 0x2 - the same predicate yabai filters with. One batched query
     // covers all candidates.
-    private static func realWindows(among windowIDs: Set<Int>) -> Set<Int> {
+    static func realWindows(among windowIDs: Set<Int>) -> Set<Int> {
         guard !windowIDs.isEmpty,
               let query = SLSWindowQueryWindows(CGSMainConnectionID(),
                                                 windowIDs.map { UInt32($0) } as CFArray,
@@ -181,6 +181,19 @@ enum Spaces {
             real.insert(Int(SLSWindowIteratorGetWindowID(iterator)))
         }
         return real
+    }
+
+    // The frontmost on-screen window the WindowServer counts as a real user
+    // window (the one holding focus). The plain CGWindowList realness filter
+    // is not enough: a fullscreen Space's slide-down toolbar is a layer-0,
+    // full-width, ~88pt window that passes it, so on such a Space the toolbar
+    // strip - not the content window - would read as topmost. The SLS tag
+    // filter rejects the strip, so this returns the window the user actually
+    // holds. nil when nothing on screen qualifies.
+    static func topOnScreenRealWindow() -> Int? {
+        let onScreen = CGWindows.real([.optionOnScreenOnly])
+        let real = realWindows(among: Set(onScreen.map(\.id)))
+        return onScreen.first { real.contains($0.id) }?.id
     }
 
     // Make a specific window key through the WindowServer: front the process
@@ -227,6 +240,14 @@ enum Spaces {
         return Set(list.map { $0.intValue })
     }
 
+    // Marks every synthetic gesture event Cyclist posts, so the gesture
+    // tap (DockSwipeRecognizer) can tell them from the user's real
+    // trackpad swipes: real swipes are consumed and rerouted into chain
+    // navigation, while these must reach the Dock untouched - swallowing
+    // them would break SpaceNavigator, and re-triggering on them would
+    // navigate in a loop.
+    static let syntheticGestureTag: Int64 = 0x4359434C  // "CYCL"
+
     // Instant Space switch: synthetic trackpad dock-swipe gestures with
     // high velocity, so the Dock switches with no animation (~40ms
     // observed). One gesture pair per step, with velocity scaled by the
@@ -264,6 +285,8 @@ enum Spaces {
         func postPair(phase: Int64) {
             guard let dockEvent = CGEvent(source: nil),
                   let gestureEvent = CGEvent(source: nil) else { return }
+            dockEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
+            gestureEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
             dockEvent.setIntegerValueField(eventTypeField, value: 30)      // DockControl
             dockEvent.setIntegerValueField(gestureHIDTypeField, value: 23) // dock swipe
             dockEvent.setIntegerValueField(gesturePhaseField, value: phase)

@@ -1,4 +1,5 @@
 import ApplicationServices
+import Foundation
 
 // Maps an AX window element to its CGWindowID; there is no public API for
 // this direction.
@@ -82,6 +83,41 @@ enum AX {
 
     static func raise(_ element: AXUIElement) {
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    }
+
+    static func position(_ element: AXUIElement) -> CGPoint? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var point = CGPoint.zero
+        guard AXValueGetValue(value as! AXValue, .cgPoint, &point) else { return nil }
+        return point
+    }
+
+    static func setPosition(_ element: AXUIElement, _ point: CGPoint) {
+        var point = point
+        guard let value = AXValueCreate(.cgPoint, &point) else { return }
+        AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, value)
+    }
+
+    // Forces a window to repaint after a cross-Space arrival. On macOS 26 an
+    // arrived window's backing store can be purged - the screen shows bare
+    // wallpaper though every bookkeeping signal is healthy - and only a real
+    // geometry change makes the app redraw; activating or raising the window
+    // does not (the WindowServer holds the empty backing, and the compositor
+    // never re-requests content). A 1px move that returns to the exact origin
+    // is that change, imperceptible in practice. SLSMoveWindow cannot do this
+    // from outside the owning process, so it goes through AXPosition - the
+    // same path AeroSpace heals with when it re-tiles. The restore is
+    // deferred one turn so the move commits as a distinct change rather than
+    // coalescing to a no-op.
+    static func repaintNudge(pid: pid_t, windowID: Int) {
+        guard let element = windows(pid: pid).first(where: { self.windowID(of: $0) == windowID }),
+              let origin = position(element) else { return }
+        setPosition(element, CGPoint(x: origin.x + 1, y: origin.y))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+            setPosition(element, origin)
+        }
     }
 
     // Presses the window's close button; closing has no window-level AX
