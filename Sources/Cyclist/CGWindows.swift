@@ -1,4 +1,5 @@
-import AppKit
+import CoreGraphics
+import Foundation
 
 // Real user windows from CGWindowList. Layer 0 alone is not enough: apps
 // keep invisible bookkeeping windows there (menu bar sized strips, cached

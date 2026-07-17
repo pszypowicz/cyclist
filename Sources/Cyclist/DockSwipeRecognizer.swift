@@ -1,4 +1,5 @@
-import AppKit
+import CoreGraphics
+import Foundation
 
 // Turns the trackpad's fluid Spaces swipe (the three- or four-finger
 // horizontal gesture, whichever "Swipe between full-screen applications"

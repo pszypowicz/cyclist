@@ -1,4 +1,5 @@
-import AppKit
+import CoreGraphics
+import Foundation
 
 // Measures the compositor wedge floor: how soon after a verified Space
 // arrival the next dock swipe may be posted before the WindowServer stops

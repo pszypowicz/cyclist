@@ -88,6 +88,19 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
+        // An armed recording swallows every keyDown system-wide; it must
+        // die with the window that shows it, or closing (or just clicking
+        // away) mid-recording leaves the keyboard globally dead until Esc.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
+            if (note.object as? NSWindow)?.identifier?.rawValue == "cyclist-settings" {
+                recorder.cancel()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+            if (note.object as? NSWindow)?.identifier?.rawValue == "cyclist-settings" {
+                recorder.cancel()
+            }
+        }
     }
 
     private var generalSection: some View {
@@ -164,8 +177,11 @@ struct SettingsView: View {
                     InfoDot("Bridges to the AeroSpace tiling window manager over its socket: its workspaces join Ctrl+Left/Right navigation and windows parked in hidden workspaces get switcher rows. Requires AeroSpace running.")
                 }
             }
+            // No stale-value guard here: Config.values lags writes by the
+            // reload debounce, so comparing against it drops a rapid second
+            // toggle. A redundant same-value write (the resync path) is
+            // harmless - the reload's equality check ends the cycle.
             .onChange(of: aerospaceIntegration) { newValue in
-                guard newValue != Config.aerospaceIntegration else { return }
                 Config.set(section: "aerospace", key: "integration", to: newValue)
             }
             Toggle(isOn: $showHollowWorkspaces) {
@@ -176,7 +192,6 @@ struct SettingsView: View {
             }
             .disabled(!aerospaceIntegration)
             .onChange(of: showHollowWorkspaces) { newValue in
-                guard newValue != Config.showHollowWorkspaces else { return }
                 Config.set(section: "aerospace", key: "show-hollow-workspaces", to: newValue)
             }
         } header: {

@@ -1,4 +1,5 @@
-import AppKit
+import CoreGraphics
+import Foundation
 
 // Session-level CGEventTaps, active taps that can consume events. The key
 // tap (keyDown + flagsChanged) is what lets Cyclist swallow Cmd+Tab

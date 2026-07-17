@@ -1,4 +1,5 @@
-import AppKit
+import CoreGraphics
+import Foundation
 
 @_silgen_name("CGSMainConnectionID")
 private func CGSMainConnectionID() -> UInt32

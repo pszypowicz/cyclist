@@ -30,8 +30,4 @@ enum Log {
         let text = message()
         diagnostics.debug("\(text, privacy: .public)")
     }
-
-    static func error(_ message: String) {
-        diagnostics.error("\(message, privacy: .public)")
-    }
 }

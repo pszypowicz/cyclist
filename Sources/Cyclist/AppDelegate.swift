@@ -96,6 +96,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // a runtime revocation invalidated the tap) and the tap is rebuilt. Also
     // covers tap creation failing while trusted, e.g. a stale TCC entry.
     private func scheduleRecovery() {
+        // A tap-invalidation callback queued just before a menu-disable
+        // must not restart polling against the user's choice.
+        guard Settings.enabled else { return }
         guard permissionTimer == nil else { return }
         Log.write("event tap down or Accessibility not granted; polling to rebuild")
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in

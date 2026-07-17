@@ -60,6 +60,15 @@ enum AppListProvider {
         persistCache()
     }
 
+    // Windows close constantly across a weeks-long session; without
+    // eviction the cache (and its persisted copy) grows one entry per
+    // window ever titled. Persistence rides the next flush - a destroy
+    // burst must not cost one UserDefaults write each.
+    static func evictTitle(windowID: Int) {
+        guard titleCache.removeValue(forKey: windowID) != nil else { return }
+        cacheDirty = true
+    }
+
     static func cachedTitle(windowID: Int) -> String? {
         titleCache[windowID]
     }
@@ -146,12 +155,15 @@ enum AppListProvider {
             for id in windowIDs { spaceByWindow[id] = space }
         }
 
+        // position(of:) is a linear scan; resolve it once per app instead
+        // of twice per sort comparison.
         let apps = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular && !$0.isTerminated
                 && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
-        }.sorted {
-            mru.position(of: $0.processIdentifier) < mru.position(of: $1.processIdentifier)
         }
+        .map { (position: mru.position(of: $0.processIdentifier), app: $0) }
+        .sorted { $0.position < $1.position }
+        .map(\.app)
 
         var entries: [ListEntry] = []
         for app in apps {

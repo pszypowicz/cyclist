@@ -29,6 +29,13 @@ final class ShortcutRecorder: ObservableObject {
         recordingKey = recordingKey == key ? nil : key
     }
 
+    // Also called when the Settings window closes or resigns key and when
+    // the taps tear down: an armed recording swallows every keyDown
+    // system-wide, so it must not outlive the UI that shows it.
+    func cancel() {
+        recordingKey = nil
+    }
+
     // Called from the tap callback for every keyDown while recording;
     // always consumes so half-typed combos never leak to the focused app.
     // State changes hop off the callback before touching SwiftUI.
@@ -51,8 +58,12 @@ final class ShortcutRecorder: ObservableObject {
             return
         }
         let shortcut = Shortcut(keyCode: keyCode, modifiers: modifiers)
+        // Compare shift-stripped, the same way matches() does: a stored
+        // cmd+shift+tab and a recorded cmd+tab collide at match time even
+        // though they are not equal.
         for (otherKey, other) in Config.shortcuts where otherKey != key {
-            if other == shortcut {
+            if other.keyCode == shortcut.keyCode,
+               other.modifiers.subtracting(.shift) == shortcut.modifiers {
                 message = "\(shortcut.display) is already \(Self.labels[otherKey] ?? otherKey)."
                 return
             }

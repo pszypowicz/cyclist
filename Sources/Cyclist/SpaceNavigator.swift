@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 // Jumps to a target Space with synthetic dock-swipe gestures (~40ms, no
 // animation, any distance, fullscreen Spaces included), verifying arrival

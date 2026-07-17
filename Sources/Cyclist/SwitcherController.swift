@@ -72,7 +72,7 @@ final class SwitcherController {
         tap.onFlagsChanged = { [weak self] event in
             self?.handleFlagsChanged(event)
         }
-        // The toggle is read per event so flipping it in the menu applies
+        // The toggle is read per event so flipping it in Settings applies
         // immediately; when off, real swipes pass through to the Dock and
         // native behavior is back without a restart.
         tap.onGesture = { [weak self] event in
@@ -100,6 +100,9 @@ final class SwitcherController {
     // navigation are dropped here.
     func stop() {
         cancel()
+        // With the tap down nothing can feed or Esc-cancel a recording, and
+        // a leftover one would swallow the first keypress after re-enable.
+        ShortcutRecorder.shared.cancel()
         navigator.cancel()
         chain.cancelPending()
         tap.stop()
@@ -124,13 +127,15 @@ final class SwitcherController {
             advanceWindows(backward: backward)
             return true
         }
-        if Settings.keyboardSpaceNav,
-           Config.previousSpaceShortcut.matches(keyCode: keyCode, flags: flags)
-            || Config.nextSpaceShortcut.matches(keyCode: keyCode, flags: flags) {
+        // Match before consulting the toggle: this branch runs for every
+        // keystroke system-wide, and the UserDefaults read belongs on the
+        // rare matched path, not the reject path.
+        let previousSpace = Config.previousSpaceShortcut.matches(keyCode: keyCode, flags: flags)
+        if previousSpace || Config.nextSpaceShortcut.matches(keyCode: keyCode, flags: flags),
+           Settings.keyboardSpaceNav {
             // Space navigation, handled off the tap callback so nothing can
             // stall event delivery.
-            let left = Config.previousSpaceShortcut.matches(keyCode: keyCode, flags: flags)
-            DispatchQueue.main.async { [weak self] in self?.chain.navigate(left: left) }
+            DispatchQueue.main.async { [weak self] in self?.chain.navigate(left: previousSpace) }
             return true
         }
 
@@ -531,7 +536,9 @@ final class SwitcherController {
         guard let session else { return }
         switch session {
         case .pendingApps, .pendingWindows:
-            // A pending session commits from its snapshot completion.
+            // Unreachable: the only caller is handleFlagsChanged's
+            // .apps/.windows arm. Pending sessions commit from their
+            // snapshot completion instead.
             return
         case .apps(let items, let index):
             self.session = nil
