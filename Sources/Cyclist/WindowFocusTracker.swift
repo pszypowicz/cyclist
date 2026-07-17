@@ -128,8 +128,7 @@ final class WindowFocusTracker {
     // didActivate backfill). Suppressed transition noise never touches
     // it, so during our own navigation the last commit stays
     // authoritative; a cross-app mouse click lands when its activation
-    // notification does (~0.1-1s), the same signal that used to clear
-    // the old commit bridge. windowID goes nil when the current window
+    // notification does (~0.1-1s). windowID goes nil when the current window
     // is destroyed or a windowless app was committed; pid survives for
     // the app-level question.
     private(set) var currentWindow: (windowID: Int?, pid: pid_t)?

@@ -61,20 +61,14 @@ final class AeroSpaceClient {
 
     var isActive: Bool { state == .active }
 
-    // The workspace hiding this window, nil for windows AeroSpace does not
-    // track or whose workspace is currently showing on some monitor.
-    func hiddenWorkspace(forWindow id: Int) -> String? {
-        guard let workspace = windowWorkspace[id] else { return nil }
-        return visibleWorkspaces.contains(workspace) ? nil : workspace
-    }
-
     // Value snapshot of the workspace caches for off-main sweeps; the live
     // dictionaries are main-thread-mutated and must not be read elsewhere.
     struct WorkspaceSnapshot {
         let windowWorkspace: [Int: String]
         let visibleWorkspaces: Set<String>
 
-        // Same rule as hiddenWorkspace(forWindow:) on the live client.
+        // The workspace hiding this window, nil for windows AeroSpace does
+        // not track or whose workspace is currently showing on some monitor.
         func hiddenWorkspace(forWindow id: Int) -> String? {
             guard let workspace = windowWorkspace[id] else { return nil }
             return visibleWorkspaces.contains(workspace) ? nil : workspace

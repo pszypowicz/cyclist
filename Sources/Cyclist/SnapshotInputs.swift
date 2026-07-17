@@ -42,11 +42,14 @@ struct SnapshotInputs {
     let includeOtherSpaces: Bool
     let includeNoWindows: Bool
 
-    // Main thread only. position(of:) is a linear scan; resolve it once
-    // per app instead of twice per sort comparison.
+    // Main thread only. The windows sweep never reads `apps`, so the
+    // Cmd+` path skips the enumerate-filter-sort entirely (this block
+    // runs under main.sync, where every wasted cycle blocks both main
+    // and the snapshot queue). position(of:) is a linear scan; resolve
+    // it once per app instead of twice per sort comparison.
     static func capture(mru: MRUTracker, recency: WindowFocusTracker,
-                        aerospace: AeroSpaceClient) -> SnapshotInputs {
-        let apps = NSWorkspace.shared.runningApplications.filter {
+                        aerospace: AeroSpaceClient, includeApps: Bool = true) -> SnapshotInputs {
+        let apps: [SnapshotApp] = !includeApps ? [] : NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular && !$0.isTerminated
                 && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
         }
@@ -63,4 +66,17 @@ struct SnapshotInputs {
             includeNoWindows: Settings.includeNoWindows
         )
     }
+}
+
+// Most recently focused first, original order as the tiebreak: Swift's
+// sort is unstable, and untracked rows (rank 0) must keep their sweep
+// order instead of shuffling between snapshots. Shared by both list
+// providers.
+func sortedByRecency<Element>(_ items: [Element], ranks: [Int: UInt64],
+                              windowID: (Element) -> Int?) -> [Element] {
+    items.enumerated().sorted { a, b in
+        let rankA = windowID(a.element).flatMap { ranks[$0] } ?? 0
+        let rankB = windowID(b.element).flatMap { ranks[$0] } ?? 0
+        return rankA != rankB ? rankA > rankB : a.offset < b.offset
+    }.map(\.element)
 }

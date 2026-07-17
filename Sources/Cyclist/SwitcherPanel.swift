@@ -91,9 +91,15 @@ final class SwitcherPanel {
             // must survive the swap or the user keeps cycling blind.
             let wasVisible = self.panel.isVisible
             self.panel.orderOut(nil)
+            // close() is what releases the replaced panel (release-when-
+            // closed is off); without it the panel and its live SwiftUI
+            // tree survive every topology change and keep rendering.
+            self.panel.close()
             self.panel = Self.makePanel(model: self.model)
             if wasVisible {
-                self.show()
+                self.layout()
+                self.panel.orderFrontRegardless()
+                self.lastOrderedFront = Date()
             }
         }
     }
