@@ -167,20 +167,28 @@ enum AX {
     // nudge after a successful one.
     static func repaintNudge(pid: pid_t, windowID: Int, element: AXUIElement? = nil, attempt: Int = 0) {
         guard attempt < 4 else { return }
-        guard let resolved = element ?? windows(pid: pid).first(where: { self.windowID(of: $0) == windowID }),
+        // Resolve by window id over the raw element list - no role reads.
+        // The lookup runs against an app mid-compositing, where every AX
+        // message risks the full timeout; the blank-to-content beat the
+        // user sees is this resolution plus the retry ladder, so it must
+        // be as few messages as possible and the retries tight.
+        guard let resolved = element
+                ?? rawWindows(pid: pid).first(where: { self.windowID(of: $0) == windowID }),
               let origin = position(resolved) else {
             // Re-resolve from scratch next time: a passed element that
             // refuses a position read may be stale.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            Log.debug("nudge: wid=\(windowID) attempt=\(attempt) unresolved")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 repaintNudge(pid: pid, windowID: windowID, attempt: attempt + 1)
             }
             return
         }
+        Log.debug("nudge: wid=\(windowID) attempt=\(attempt) applied")
         setPosition(resolved, CGPoint(x: origin.x + 1, y: origin.y))
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
             setPosition(resolved, origin)
             if attempt == 0 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     repaintNudge(pid: pid, windowID: windowID, element: resolved, attempt: 3)
                 }
             }
