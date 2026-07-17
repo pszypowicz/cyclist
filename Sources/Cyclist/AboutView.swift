@@ -44,35 +44,6 @@ struct AboutView: View {
     }
 
     static func showWindow() {
-        let windowID = "about-cyclist"
-
-        if let existing = NSApp.windows.first(where: { $0.identifier?.rawValue == windowID }) {
-            existing.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-
-        let hostingView = NSHostingView(rootView: AboutView())
-        hostingView.translatesAutoresizingMaskIntoConstraints = false
-        let fittingSize = hostingView.fittingSize
-
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: fittingSize),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        window.identifier = NSUserInterfaceItemIdentifier(windowID)
-        window.title = "About Cyclist"
-        window.contentView = hostingView
-        window.center()
-        // The window outlives its close button: the same instance is reordered
-        // front on the next About click instead of being rebuilt.
-        window.isReleasedWhenClosed = false
-        // An accessory app has no Dock presence to click back to; floating
-        // keeps the window reachable over whatever is frontmost.
-        window.level = .floating
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        UtilityWindow.show(id: "about-cyclist", title: "About Cyclist", content: AboutView())
     }
 }

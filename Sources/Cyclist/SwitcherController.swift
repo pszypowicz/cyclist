@@ -61,6 +61,7 @@ final class SwitcherController {
     private let kKey: Int64 = 40
     private let qKey: Int64 = 12
     private let wKey: Int64 = 13
+    private let commaKey: Int64 = 43
 
     init(mru: MRUTracker, recency: WindowFocusTracker, aerospace: AeroSpaceClient, events: WindowServerEvents) {
         self.mru = mru
@@ -145,6 +146,12 @@ final class SwitcherController {
             return true
         case wKey where session != nil:
             closeSelectedWindow()
+            return true
+        // Cmd is already down in a session, so this is Cmd+, - the
+        // platform's settings shortcut.
+        case commaKey where session != nil:
+            cancel()
+            DispatchQueue.main.async { SettingsView.showWindow() }
             return true
         default:
             return false
