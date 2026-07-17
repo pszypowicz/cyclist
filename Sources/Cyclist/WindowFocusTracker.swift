@@ -94,6 +94,9 @@ final class WindowFocusTracker {
             self?.sequence.removeValue(forKey: windowID)
             AppListProvider.evictTitle(windowID: windowID)
             WindowElements.evict(windowID: windowID)
+            if self?.currentWindow?.windowID == windowID {
+                self?.currentWindow?.windowID = nil
+            }
         }
     }
 
@@ -117,15 +120,27 @@ final class WindowFocusTracker {
         sequence
     }
 
-    // True while a self-driven Space transition is in flight or its raise
-    // noise is still settling. The WindowServer z-order lags compositing
-    // in that window; the ranks do not - commits record their target at
-    // intent time and the suppression above keeps transition noise out.
-    var navigationSettling: Bool { suppressing }
+    // The single current-window authority: what the switcher excludes as
+    // "the window the user holds" and whose pid answers "the frontmost
+    // app". Fed only by signals this tracker already trusts - the
+    // switcher's commits at intent time, and focus events accepted into
+    // the ranks (same-app focus, an activation storm's first focus, the
+    // didActivate backfill). Suppressed transition noise never touches
+    // it, so during our own navigation the last commit stays
+    // authoritative; a cross-app mouse click lands when its activation
+    // notification does (~0.1-1s), the same signal that used to clear
+    // the old commit bridge. windowID goes nil when the current window
+    // is destroyed or a windowless app was committed; pid survives for
+    // the app-level question.
+    private(set) var currentWindow: (windowID: Int?, pid: pid_t)?
 
-    // The window the ranks say holds focus - the last one recorded.
-    func topRankedWindowID() -> Int? {
-        sequence.max { $0.value < $1.value }?.key
+    // Commit-intent feed from the switcher: the freshest possible truth
+    // for switches Cyclist itself makes.
+    func noteCommit(app: NSRunningApplication, windowID: Int?) {
+        currentWindow = (windowID, app.processIdentifier)
+        if let windowID {
+            noteFocus(windowID: windowID, source: "commit")
+        }
     }
 
     // Called from the switcher right before it activates an app, so the
@@ -150,6 +165,7 @@ final class WindowFocusTracker {
                 storm.sawFocus = true
                 self.storm = storm
             }
+            currentWindow = (rejected.windowID, rejected.pid)
             noteFocus(windowID: rejected.windowID, source: "activation")
             lastRejected = nil
         }
@@ -188,6 +204,7 @@ final class WindowFocusTracker {
             }
             storm.sawFocus = true
             self.storm = storm
+            currentWindow = (windowID, pid)
             noteFocus(windowID: windowID, source: "ws-focus")
             return
         }
@@ -203,6 +220,7 @@ final class WindowFocusTracker {
             Log.debug("recency: wid=\(windowID) raise rejected (pid \(pid) not frontmost)")
             return
         }
+        currentWindow = (windowID, pid)
         noteFocus(windowID: windowID, source: "ws-focus")
     }
 }

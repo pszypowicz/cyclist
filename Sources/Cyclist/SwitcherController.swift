@@ -48,13 +48,6 @@ final class SwitcherController {
     // fail up to its timeout later) once a newer activation happened;
     // native arrivals are covered by navigator.cancel() instead.
     private var activationGeneration = 0
-    // NSWorkspace's frontmost app lags a makeKey/AeroSpace activation by
-    // ~0.1-1s. A press inside that window would classify rows against the
-    // app just left: a quick Cmd+Tab re-commits the very window the user
-    // is on, and Cmd+` lists the wrong app's windows. Right after our own
-    // commit, we are the fresher source of truth.
-    private var lastCommit: (app: NSRunningApplication, at: Date)?
-    private var activationObserver: NSObjectProtocol?
 
     // Fired when the key tap dies (e.g. Accessibility revoked at runtime);
     // the owner polls for the grant and calls start() to rebuild.
@@ -94,24 +87,6 @@ final class SwitcherController {
         }
         tap.onInvalidated = { [weak self] in
             self?.onTapInvalidated?()
-        }
-        // A genuine user-driven app switch (mouse, Dock) supersedes the
-        // commit bridge: holding lastCommit for its full 1.5s made a quick
-        // window-cycle right after such a switch list the COMMITTED app's
-        // windows instead of the frontmost one (#22). Cyclist's own
-        // activation notifications lag their commit by up to ~1s, so a
-        // cross-app arrival right after a rapid double-commit belongs to
-        // the superseded commit and must not clear the fresh bridge - the
-        // 0.2s grace covers that, at the cost of a user switch inside
-        // those 200ms still hitting the stale bridge.
-        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] note in
-            guard let self, let lastCommit = self.lastCommit,
-                  let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                  app.processIdentifier != lastCommit.app.processIdentifier,
-                  Date().timeIntervalSince(lastCommit.at) > 0.2 else { return }
-            self.lastCommit = nil
         }
     }
 
@@ -403,9 +378,13 @@ final class SwitcherController {
         }
     }
 
+    // The current-window authority answers this in single-digit ms for
+    // every switch Cyclist makes; NSWorkspace (which lags those switches
+    // by ~0.1-1s) remains only as the cold-start fallback.
     private func frontmostForSessions() -> NSRunningApplication? {
-        if let lastCommit, Date().timeIntervalSince(lastCommit.at) < 1.5 {
-            return lastCommit.app
+        if let pid = recency.currentWindow?.pid,
+           let app = NSRunningApplication(processIdentifier: pid) {
+            return app
         }
         return NSWorkspace.shared.frontmostApplication
     }
@@ -415,32 +394,14 @@ final class SwitcherController {
     // window is the suggestion, not another app - and after coming from
     // another app, that app's window outranks the stale sibling. One rule
     // covers both: the best-ranked window that is not the one holding
-    // focus. The held window comes from the WindowServer's z-order (the
-    // topmost on-screen real window), not from the focus-event stream:
-    // event-derived "current" goes stale in the gap between a focus
-    // change and its notifications, and a stale exclusion makes the tap
-    // re-commit the very window the user is on. The realness filter matters
-    // on a fullscreen Space: its slide-down toolbar is a layer-0 ~88pt
-    // window that tops the plain CGWindowList, so without the filter the
-    // strip - not the content window - reads as current, the content window
-    // is never excluded, and a quick tap re-commits the fullscreen app to
-    // itself instead of the previous window. Rows without ranks fall back to
+    // focus. The held window is the current-window authority - fed by our
+    // own commits at intent time (so it is never stale mid-transition,
+    // where the WindowServer z-order lies) and by accepted focus events
+    // for switches made outside Cyclist. Rows without ranks fall back to
     // the previous-app heuristic.
     private func initialAppsIndex(items: [ListEntry], backward: Bool) -> Int {
         if backward { return items.count - 1 }
-        // While our own Space navigation settles, the z-order lags
-        // compositing: the window just left can still read as top-on-screen,
-        // which excludes the true bounce target (the tap veers to a third
-        // window and drops the fullscreen partner from the rotation) or
-        // fails to exclude the true current one (the tap re-commits it).
-        // The ranks have neither problem there - commits record their
-        // target at intent time and transition raise noise is suppressed -
-        // so the top rank IS the current window. Outside a settle window
-        // the z-order stays authoritative: a mouse-clicked focus is current
-        // in the z-order immediately but unranked until its event arrives.
-        let current = recency.navigationSettling
-            ? recency.topRankedWindowID()
-            : Spaces.topOnScreenRealWindow()
+        let current = recency.currentWindow?.windowID
         var best: (index: Int, rank: UInt64)?
         for (index, item) in items.enumerated() {
             guard let windowID = item.windowID, windowID != current else { continue }
@@ -634,7 +595,7 @@ final class SwitcherController {
         if entry.state == .noWindows || (entry.axWindow == nil && entry.windowID == nil),
            let url = app.bundleURL {
             navigator.cancel()
-            lastCommit = (app, Date())
+            recency.noteCommit(app: app, windowID: nil)
             recency.expectActivation(of: app)
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
@@ -661,16 +622,14 @@ final class SwitcherController {
         navigator.cancel()
         chain.cancelPending()
         activationGeneration += 1
-        lastCommit = (app, Date())
         // Record at commit intent, not on arrival focus: didActivate
         // propagates ~0.1-1s after a switch, but a quick tap lets the user
         // reopen the switcher within ~200ms and that snapshot must already
-        // rank this window first. The storm snapshot must also beat the
+        // rank this window first - and the current-window authority must
+        // already point here. The storm snapshot must also beat the
         // activation's focus-event burst.
         recency.expectActivation(of: app)
-        if let windowID {
-            recency.noteFocus(windowID: windowID, source: "commit")
-        }
+        recency.noteCommit(app: app, windowID: windowID)
         if app.isHidden {
             app.unhide()
         }
