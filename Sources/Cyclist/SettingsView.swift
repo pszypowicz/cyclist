@@ -3,15 +3,38 @@ import ServiceManagement
 import SwiftUI
 
 // A hover affordance for the settings whose meaning is not obvious from
-// the label: the info circle carries the tooltip, keeping the row clean.
+// the label. The native help tooltip takes over a second to appear and
+// cannot be styled, so the info circle presents a popover after a short
+// hover delay instead.
 private struct InfoDot: View {
     let text: String
     init(_ text: String) { self.text = text }
 
+    @State private var shown = false
+    @State private var hoverDelay: Task<Void, Never>?
+
     var body: some View {
         Image(systemName: "info.circle")
             .foregroundStyle(.secondary)
-            .help(text)
+            .onHover { inside in
+                hoverDelay?.cancel()
+                if inside {
+                    hoverDelay = Task {
+                        try? await Task.sleep(nanoseconds: 150_000_000)
+                        guard !Task.isCancelled else { return }
+                        shown = true
+                    }
+                } else {
+                    shown = false
+                }
+            }
+            .popover(isPresented: $shown) {
+                Text(text)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 280, alignment: .leading)
+                    .padding(12)
+            }
     }
 }
 
