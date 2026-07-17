@@ -1,9 +1,11 @@
 import AppKit
 
-// State machine for a switcher session: Cmd+Tab starts an app session,
-// Cmd+` starts a window session for the frontmost app. While Cmd is held,
-// Tab/backtick advance (Shift reverses), Esc cancels, and releasing Cmd
-// commits the current selection.
+// State machine for a switcher session: the switcher binding (Cmd+Tab by
+// default) starts an app session, the cycle binding (Cmd+`) a window
+// session for the frontmost app. While the binding's modifiers are held,
+// its key advances (Shift reverses), Esc cancels, and releasing a
+// modifier commits the current selection. Bindings live in the config
+// file and are read per event, so a rebind applies immediately.
 final class SwitcherController {
     private let tap = EventTap()
     private let mru: MRUTracker
@@ -50,11 +52,7 @@ final class SwitcherController {
     // the owner polls for the grant and calls start() to rebuild.
     var onTapInvalidated: (() -> Void)?
 
-    private let tabKey: Int64 = 48
-    private let graveKey: Int64 = 50
     private let escapeKey: Int64 = 53
-    private let leftArrowKey: Int64 = 123
-    private let rightArrowKey: Int64 = 124
     private let upArrowKey: Int64 = 126
     private let downArrowKey: Int64 = 125
     private let jKey: Int64 = 38
@@ -110,31 +108,38 @@ final class SwitcherController {
     private func handleKeyDown(_ event: CGEvent) -> Bool {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
-        let command = flags.contains(.maskCommand)
         let backward = flags.contains(.maskShift)
-        let control = flags.contains(.maskControl)
-        let alternate = flags.contains(.maskAlternate)
-        let otherModifiers = control || alternate
-        let controlOnly = control && !command && !backward && !alternate
 
-        switch keyCode {
-        case tabKey where command && !otherModifiers:
+        // A recording in Settings gets the raw press; consuming it keeps
+        // half-typed combos from leaking to the focused app.
+        if ShortcutRecorder.shared.isRecording {
+            return ShortcutRecorder.shared.consume(keyCode: keyCode, flags: flags)
+        }
+
+        if Config.switcherShortcut.matches(keyCode: keyCode, flags: flags) {
             advanceApps(backward: backward)
             return true
-        case graveKey where command && !otherModifiers:
+        }
+        if Config.cycleWindowsShortcut.matches(keyCode: keyCode, flags: flags) {
             advanceWindows(backward: backward)
             return true
+        }
+        if Settings.keyboardSpaceNav,
+           Config.previousSpaceShortcut.matches(keyCode: keyCode, flags: flags)
+            || Config.nextSpaceShortcut.matches(keyCode: keyCode, flags: flags) {
+            // Space navigation, handled off the tap callback so nothing can
+            // stall event delivery.
+            let left = Config.previousSpaceShortcut.matches(keyCode: keyCode, flags: flags)
+            DispatchQueue.main.async { [weak self] in self?.chain.navigate(left: left) }
+            return true
+        }
+
+        switch keyCode {
         case escapeKey where session != nil:
             cancel()
             return true
-        case leftArrowKey where controlOnly, rightArrowKey where controlOnly:
-            // Space navigation, handled off the tap callback so nothing can
-            // stall event delivery.
-            let left = keyCode == leftArrowKey
-            DispatchQueue.main.async { [weak self] in self?.chain.navigate(left: left) }
-            return true
-        // List keys live only inside a session (Cmd held): outside one,
-        // arrows, j/k, q, and w pass through untouched.
+        // List keys live only inside a session (the binding's modifiers
+        // held): outside one, arrows, j/k, q, and w pass through untouched.
         case downArrowKey where session != nil, jKey where session != nil:
             advanceCurrent(backward: false)
             return true
@@ -147,8 +152,9 @@ final class SwitcherController {
         case wKey where session != nil:
             closeSelectedWindow()
             return true
-        // Cmd is already down in a session, so this is Cmd+, - the
-        // platform's settings shortcut.
+        // The binding's modifiers are already down in a session, so with
+        // the default binding this is Cmd+, - the platform's settings
+        // shortcut.
         case commaKey where session != nil:
             cancel()
             DispatchQueue.main.async { SettingsView.showWindow() }
@@ -170,7 +176,16 @@ final class SwitcherController {
     }
 
     private func handleFlagsChanged(_ event: CGEvent) {
-        guard let session, !event.flags.contains(.maskCommand) else { return }
+        guard let session else { return }
+        // The session lives while every modifier of its binding stays
+        // down; the first one released commits.
+        let binding: Shortcut
+        switch session {
+        case .apps, .pendingApps: binding = Config.switcherShortcut
+        case .windows, .pendingWindows: binding = Config.cycleWindowsShortcut
+        }
+        let required = binding.modifiers.subtracting(.shift)
+        guard !Shortcut.normalized(event.flags).isSuperset(of: required) else { return }
         switch session {
         case .pendingApps, .pendingWindows:
             pendingCommits.append((snapshotGeneration, session))

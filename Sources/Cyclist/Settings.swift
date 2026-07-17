@@ -6,6 +6,7 @@ enum Settings {
     static let includeOtherSpacesKey = "includeOtherSpaces"
     static let includeNoWindowsKey = "includeNoWindows"
     static let trackpadSwipeKey = "trackpadSwipe"
+    static let keyboardSpaceNavKey = "keyboardSpaceNavigation"
     static let enabledKey = "enabled"
 
     static func registerDefaults() {
@@ -15,6 +16,7 @@ enum Settings {
             includeOtherSpacesKey: true,
             includeNoWindowsKey: false,
             trackpadSwipeKey: true,
+            keyboardSpaceNavKey: true,
             enabledKey: true,
         ])
     }
@@ -37,6 +39,10 @@ enum Settings {
 
     static var trackpadSwipe: Bool {
         UserDefaults.standard.bool(forKey: trackpadSwipeKey)
+    }
+
+    static var keyboardSpaceNav: Bool {
+        UserDefaults.standard.bool(forKey: keyboardSpaceNavKey)
     }
 
     static var enabled: Bool {

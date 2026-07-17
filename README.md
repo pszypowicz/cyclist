@@ -6,7 +6,7 @@
 
 A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots - just a list of app icons, names, and window titles you cycle through with Cmd+Tab.
 
-> **Beta.** Cyclist is in early development (0.x). Expect rough edges, hardcoded shortcuts, and breaking changes between releases.
+> **Beta.** Cyclist is in early development (0.x). Expect rough edges and breaking changes between releases.
 
 <p align="center">
   <img src="docs/demo.svg" width="830" alt="Hold Cmd to open a vertical text list where every window is its own row, some tagged 'other space'; move the selection to a Safari window that lives in a fullscreen Space, release Cmd, and the display jumps straight to that Space.">
@@ -28,6 +28,8 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
   - include running apps with **no windows** at all (off by default; selecting one behaves like clicking its Dock icon, so the app reopens a window)
 
 ## Keybindings
+
+The four global shortcuts below are the defaults - rebind them in Settings (click the shortcut, press the new keys) or in the config file's `[shortcuts]` section.
 
 Global - work anytime:
 
@@ -90,6 +92,15 @@ ${XDG_CONFIG_HOME:-~/.config}/cyclist/cyclist.toml
 ```
 
 ```toml
+[shortcuts]
+# Modifiers and a key joined with "+": cmd, alt, ctrl, shift plus a key
+# name (tab, backtick, left, right, up, down, space, return, a letter,
+# a digit, ...). Defaults below.
+switcher = "cmd+tab"
+cycle-windows = "cmd+backtick"
+previous-space = "ctrl+left"
+next-space = "ctrl+right"
+
 [aerospace]
 # The AeroSpace bridge (socket client). Default: false.
 integration = true
@@ -99,20 +110,20 @@ integration = true
 show-hollow-workspaces = false
 ```
 
-- The accepted grammar is a TOML subset: `[section]` headers, `key = true|false` lines, and `#` comments. Unreadable lines and unknown keys are logged and skipped.
+- The accepted grammar is a TOML subset: `[section]` headers, `key = true|false` and `key = "string"` lines, and `#` comments. Unreadable lines and unknown keys are logged and skipped.
 - A missing file is created from a commented template (the example above) on first launch; a missing key means its default. Beyond that, Cyclist writes the file only when an AeroSpace switch is flipped in Settings, as a single-line edit: comments, formatting, and symlinked (stow-managed) files survive.
 - Edits apply live.
 - `XDG_CONFIG_HOME` is honored when the app's environment carries it (absolute paths only, per the XDG spec). GUI launches usually don't - launchd provides the environment, not the shell - so `~/.config` is the effective location.
 
 ## Known limitations
 
-- Cyclist consumes Ctrl+Left/Right for chain navigation; disable the equivalent Mission Control shortcuts if you do not want both meanings. The menu's Enabled switch (or quitting Cyclist) brings the native behavior back.
+- Cyclist consumes the Previous/Next Space shortcuts (Ctrl+Left/Right by default) for chain navigation; disable the equivalent Mission Control shortcuts if you do not want both meanings, or turn off "Keyboard Space navigation" in Settings. The menu's Enabled switch (or quitting Cyclist) brings the native behavior back.
 - Cyclist also consumes the trackpad Spaces-swipe gesture while "Trackpad swipe navigation" is on; flip the Settings toggle to get the native animated swipe back without quitting. One swipe is one step - a long swipe does not scrub across several Spaces.
 - While a password field has secure input enabled, macOS withholds keystrokes from event taps, so Cmd+Tab temporarily falls through to the native switcher.
 - Same-app window rows for other Spaces rely on the window-server list; their titles need Screen Recording permission or a previous sighting of the window (same rule as the app switcher's other-Space rows).
 - The AeroSpace bridge speaks the server's socket protocol (version 1) and tracks the workspaces of AeroSpace's focused monitor. With several native desktops the ring only expands the current one.
 - The list is keyboard-only; the panel ignores mouse clicks.
-- Shortcuts are not yet rebindable.
+- Recording a shortcut needs Cyclist enabled - the recorder captures through the same event tap the shortcuts use.
 
 ## Acknowledgements
 
