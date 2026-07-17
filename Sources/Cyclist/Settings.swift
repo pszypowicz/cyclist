@@ -16,6 +16,7 @@ enum Settings {
     static let showMenuBarIconKey = "showMenuBarIcon"
     static let aerospaceIntegrationKey = "aerospaceIntegration"
     static let showHollowWorkspacesKey = "showHollowWorkspaces"
+    static let demoHudKey = "demoHud"
     static let switcherShortcutKey = "switcherShortcut"
     static let cycleWindowsShortcutKey = "cycleWindowsShortcut"
     static let previousSpaceShortcutKey = "previousSpaceShortcut"
@@ -32,6 +33,7 @@ enum Settings {
             showMenuBarIconKey: true,
             aerospaceIntegrationKey: false,
             showHollowWorkspacesKey: false,
+            demoHudKey: false,
             switcherShortcutKey: "cmd+tab",
             cycleWindowsShortcutKey: "cmd+backtick",
             previousSpaceShortcutKey: "ctrl+left",
@@ -73,6 +75,10 @@ enum Settings {
 
     static var showHollowWorkspaces: Bool {
         UserDefaults.standard.bool(forKey: showHollowWorkspacesKey)
+    }
+
+    static var demoHud: Bool {
+        UserDefaults.standard.bool(forKey: demoHudKey)
     }
 }
 

@@ -60,10 +60,14 @@ final class ChainNavigator {
         pendingWorkspace = nil
     }
 
-    func navigate(left: Bool) {
+    // Returns the demo HUD's line for the step it initiated ("workspace 2
+    // → Safari (fullscreen)"), nil when nothing was (HUD off, edge of the
+    // ring, no ring position).
+    @discardableResult
+    func navigate(left: Bool) -> String? {
         guard let display = Spaces.activeDisplayInfo() else {
             Log.write("chain: no display info")
-            return
+            return nil
         }
         // Self-heal a stranded client (missed enable event, exhausted
         // reconnect); async and debounced, never affects this press.
@@ -72,15 +76,20 @@ final class ChainNavigator {
             Log.write("chain: position not in ring; current \(display.current)"
                 + " pending \(navigator.pendingTarget.map(String.init) ?? "-")"
                 + " order \(display.order)")
-            return
+            return nil
         }
         let base = ring[baseIndex]
         let targetIndex = baseIndex + (left ? -1 : 1)
         guard ring.indices.contains(targetIndex) else {
             Log.write("chain: at \(left ? "left" : "right") edge of \(ring.map(describe))")
-            return
+            return nil
         }
         let direction = left ? "left" : "right"
+        // Resolved before the step so the labels read the pre-transition
+        // state; the SLS lookups behind the fullscreen label only run
+        // while the HUD wants them.
+        let hudDetail = Settings.demoHud
+            ? "\(hudLabel(base, display)) → \(hudLabel(ring[targetIndex], display))" : nil
 
         switch ring[targetIndex] {
         case .native(let id):
@@ -134,6 +143,26 @@ final class ChainNavigator {
             if !started {
                 pendingWorkspace = nil
             }
+        }
+        return hudDetail
+    }
+
+    // Demo-HUD label for a ring stop, in Mission Control's nomenclature:
+    // AeroSpace workspaces by name, user desktops as "desktop", and a
+    // fullscreen Space by the app it shows (any real window's owner - a
+    // split-view Space names just one of its apps).
+    private func hudLabel(_ element: RingElement, _ display: DisplayInfo) -> String {
+        switch element {
+        case .workspace(let name, _):
+            return "workspace \(name)"
+        case .native(let id):
+            guard display.types[id] != 0 else { return "desktop" }
+            if let windowID = Spaces.realWindows(among: Spaces.windowIDs(inSpace: id)).first,
+               let pid = CGWindows.realOwner(of: windowID)?.pid,
+               let name = NSRunningApplication(processIdentifier: pid)?.localizedName {
+                return "\(name) (fullscreen)"
+            }
+            return "fullscreen"
         }
     }
 

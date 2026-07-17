@@ -83,7 +83,12 @@ final class SwitcherController {
         swipes.onSwipe = { [weak self] left in
             // Space navigation, handled off the tap callback so nothing can
             // stall event delivery (same as Ctrl+Arrows).
-            DispatchQueue.main.async { self?.chain.navigate(left: left) }
+            DispatchQueue.main.async {
+                let detail = self?.chain.navigate(left: left)
+                // The arrow is the navigation direction, matching the
+                // Ctrl+Arrow flashes, not the finger direction.
+                DemoHUD.shared.flash("Swipe \(left ? "←" : "→")", detail: detail)
+            }
         }
         tap.onInvalidated = { [weak self] in
             self?.onTapInvalidated?()
@@ -97,7 +102,6 @@ final class SwitcherController {
     private func handleKeyDown(_ event: CGEvent) -> Bool {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
-        let backward = flags.contains(.maskShift)
 
         // A recording in Settings gets the raw press; consuming it keeps
         // half-typed combos from leaking to the focused app.
@@ -105,14 +109,33 @@ final class SwitcherController {
             return ShortcutRecorder.shared.consume(keyCode: keyCode, flags: flags)
         }
 
+        let outcome = processKeyDown(keyCode: keyCode, flags: flags)
+        // Every consumed press is a trigger the demo HUD can announce;
+        // the AppKit work is deferred off the tap callback.
+        if outcome == .consumed, Settings.demoHud {
+            let display = Shortcut(keyCode: keyCode, modifiers: Shortcut.normalized(flags)).display
+            DispatchQueue.main.async { DemoHUD.shared.flash(display) }
+        }
+        return outcome != .passed
+    }
+
+    // Whether a press was consumed, and who tells the demo HUD: consumed
+    // presses flash generically from handleKeyDown, except chain
+    // navigation, which flashes from the navigate path - the transition
+    // it announces is only known there.
+    private enum KeyDownOutcome { case passed, consumed, consumedAnnounced }
+
+    private func processKeyDown(keyCode: Int64, flags: CGEventFlags) -> KeyDownOutcome {
+        let backward = flags.contains(.maskShift)
+
         let shortcuts = ShortcutSettings.shared
         if shortcuts.switcher.matches(keyCode: keyCode, flags: flags) {
             advanceApps(backward: backward)
-            return true
+            return .consumed
         }
         if shortcuts.cycleWindows.matches(keyCode: keyCode, flags: flags) {
             advanceWindows(backward: backward)
-            return true
+            return .consumed
         }
         // Space navigation never applies inside an open session - the
         // session keys below must win there even when a Space binding
@@ -124,40 +147,44 @@ final class SwitcherController {
             let previousSpace = shortcuts.previousSpace.matches(keyCode: keyCode, flags: flags)
             if previousSpace || shortcuts.nextSpace.matches(keyCode: keyCode, flags: flags),
                Settings.keyboardSpaceNav {
+                let trigger = (previousSpace ? shortcuts.previousSpace : shortcuts.nextSpace).display
                 // Space navigation, handled off the tap callback so nothing
                 // can stall event delivery.
-                DispatchQueue.main.async { [weak self] in self?.chain.navigate(left: previousSpace) }
-                return true
+                DispatchQueue.main.async { [weak self] in
+                    let detail = self?.chain.navigate(left: previousSpace)
+                    DemoHUD.shared.flash(trigger, detail: detail)
+                }
+                return .consumedAnnounced
             }
         }
 
         switch keyCode {
         case escapeKey where session != nil:
             cancel()
-            return true
+            return .consumed
         // List keys live only inside a session (the binding's modifiers
         // held): outside one, arrows, j/k, q, and w pass through untouched.
         case downArrowKey where session != nil, jKey where session != nil:
             advanceCurrent(backward: false)
-            return true
+            return .consumed
         case upArrowKey where session != nil, kKey where session != nil:
             advanceCurrent(backward: true)
-            return true
+            return .consumed
         case qKey where session != nil:
             quitSelected()
-            return true
+            return .consumed
         case wKey where session != nil:
             closeSelectedWindow()
-            return true
+            return .consumed
         // The binding's modifiers are already down in a session, so with
         // the default binding this is Cmd+, - the platform's settings
         // shortcut.
         case commaKey where session != nil:
             cancel()
             DispatchQueue.main.async { SettingsView.showWindow() }
-            return true
+            return .consumed
         default:
-            return false
+            return .passed
         }
     }
 
