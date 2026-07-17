@@ -5,7 +5,7 @@ import AppKit
 // window of that app I just came from" first, so bouncing between two
 // windows of one app (a fullscreen browser window and a normal one, say)
 // means cycling past every other row each time. Sources, all main-queue:
-//   - the WindowServer focus stream (WindowServerFocus): the window server
+//   - the WindowServer focus stream (WindowServerEvents): the window server
 //     announces every real focus change no matter how busy the app is or
 //     how broken its Accessibility tree may be,
 //   - the switcher's commit paths and the chain's arrival focus, whose
@@ -92,6 +92,7 @@ final class WindowFocusTracker {
         }
         events.onDestroyed = { [weak self] windowID in
             self?.sequence.removeValue(forKey: windowID)
+            AppListProvider.evictTitle(windowID: windowID)
         }
     }
 

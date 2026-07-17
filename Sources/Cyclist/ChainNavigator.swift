@@ -33,9 +33,9 @@ final class ChainNavigator {
     // A direct workspace switch answers in ~10-30ms; past that the press
     // was lost and the next one should re-read reality. The two-hop grace
     // covers the paced native leg before the switch can even be issued:
-    // a dropped swipe costs the 1.15s pacing floor plus three 0.4s
-    // in-flight checks per retry, so the worst verified arrival lands
-    // past 4s.
+    // each hop is event-gated on the previous transition landing plus the
+    // settle gap, so a dropped swipe's verified arrival can land seconds
+    // later.
     private let directSwitchGrace: TimeInterval = 0.3
     private let hopSwitchGrace: TimeInterval = 5.0
 

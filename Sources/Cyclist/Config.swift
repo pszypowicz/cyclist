@@ -1,7 +1,8 @@
-import AppKit
+import Foundation
 
-// File-driven configuration for the settings that belong in dotfiles
-// rather than a menu (the AeroSpace-related ones):
+// File-driven configuration for the settings that dotfiles can own - the
+// shortcut bindings and the AeroSpace ones. The Settings window reads and
+// writes the same file:
 //
 //   ${XDG_CONFIG_HOME:-~/.config}/cyclist/cyclist.toml
 //
@@ -147,13 +148,29 @@ enum Config {
     }
 
     private static func write(section: String, key: String, valueText: String) {
-        let text = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? template
+        let text: String
+        if let existing = try? String(contentsOf: fileURL, encoding: .utf8) {
+            text = existing
+        } else if (try? FileManager.default.attributesOfItem(atPath: fileURL.path)) == nil {
+            text = template
+        } else {
+            // A file that exists but cannot be read (not UTF-8, permissions)
+            // must never be replaced by the template - that would erase the
+            // user's hand-maintained config. Surface it and resync the UI to
+            // the values actually in effect.
+            Log.write("config: refusing to write \(section).\(key); \(displayPath) exists but is unreadable")
+            NotificationCenter.default.post(name: didChangeNotification, object: nil)
+            return
+        }
         do {
             try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
             try rewriting(text, section: section, key: key, valueText: valueText)
                 .write(to: fileURL.resolvingSymlinksInPath(), atomically: true, encoding: .utf8)
         } catch {
             Log.write("config: write failed for \(section).\(key): \(error)")
+            // The UI moved optimistically; the resync snaps it back to the
+            // values actually in effect.
+            NotificationCenter.default.post(name: didChangeNotification, object: nil)
             return
         }
         // A directory this write just created had no watcher to notice it;
@@ -167,7 +184,10 @@ enum Config {
         var insertAt: Int?
         for (index, raw) in lines.enumerated() {
             let uncommented = raw[..<(raw.firstIndex(of: "#") ?? raw.endIndex)]
-            let line = uncommented.trimmingCharacters(in: .whitespaces)
+            // whitespacesAndNewlines also strips the \r a CRLF-saved file
+            // leaves at line ends; without it no section header ever
+            // matches and every write appends a duplicate section.
+            let line = uncommented.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.hasPrefix("["), line.hasSuffix("]") {
                 current = String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
                 if current == section { insertAt = index + 1 }
@@ -196,8 +216,8 @@ enum Config {
         return lines.joined(separator: "\n")
     }
 
-    // Seed for the first Settings-window write when no file exists yet;
-    // mirrors the README example so the created file documents itself.
+    // Written at first launch when no file exists; mirrors the README
+    // example so the created file documents itself.
     private static let template = """
         [shortcuts]
         # Modifiers and a key joined with "+": cmd, alt, ctrl, shift plus a key
@@ -238,6 +258,9 @@ enum Config {
         guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else { return Values() }
         var result = Values()
         var section = ""
+        // First occurrence wins on duplicate keys, matching the writer,
+        // which edits the first matching line.
+        var seen: Set<String> = []
         for (index, rawLine) in text.components(separatedBy: .newlines).enumerated() {
             let uncommented = rawLine[..<(rawLine.firstIndex(of: "#") ?? rawLine.endIndex)]
             let line = uncommented.trimmingCharacters(in: .whitespaces)
@@ -254,6 +277,10 @@ enum Config {
             let key = parts[0].trimmingCharacters(in: .whitespaces)
             let valueText = parts[1].trimmingCharacters(in: .whitespaces)
             let fullKey = section.isEmpty ? key : "\(section).\(key)"
+            guard seen.insert(fullKey).inserted else {
+                Log.write("config: \(fileURL.lastPathComponent):\(index + 1) duplicate key ignored: \(fullKey)")
+                continue
+            }
             switch fullKey {
             case "aerospace.integration", "aerospace.show-hollow-workspaces":
                 guard let value = Bool(valueText) else {
@@ -267,7 +294,13 @@ enum Config {
                 }
             case "shortcuts.switcher", "shortcuts.cycle-windows",
                  "shortcuts.previous-space", "shortcuts.next-space":
-                guard let shortcut = Shortcut.parse(unquoted(valueText)) else {
+                // A binding without a real modifier would steal a plain key
+                // system-wide, and a session under it could never commit
+                // (there is no modifier to release). Same rule the recorder
+                // enforces; shift alone does not count - it is the reverse
+                // key and matching ignores it.
+                guard let shortcut = Shortcut.parse(unquoted(valueText)),
+                      !shortcut.modifiers.subtracting(.shift).isEmpty else {
                     Log.write("config: \(fileURL.lastPathComponent):\(index + 1) unreadable: \(line)")
                     continue
                 }

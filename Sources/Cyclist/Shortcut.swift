@@ -41,7 +41,7 @@ struct Shortcut: Equatable {
             } else if let code = codesByName[token] {
                 guard keyCode == nil else { return nil }
                 keyCode = code
-            } else if token.hasPrefix("code"), let code = Int64(token.dropFirst(4)) {
+            } else if token.hasPrefix("code"), let code = Int64(token.dropFirst(4)), code >= 0 {
                 guard keyCode == nil else { return nil }
                 keyCode = code
             } else {

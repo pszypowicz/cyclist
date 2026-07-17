@@ -163,7 +163,7 @@ final class AeroSpaceClient {
     // MARK: - freshness
 
     // Debounced full cache refresh; every subscription event funnels here,
-    // so a burst of focus changes costs one 4-command round.
+    // so a burst of focus changes coalesces into a single refresh round.
     func refresh() {
         guard state == .active else { return }
         refreshWork?.cancel()

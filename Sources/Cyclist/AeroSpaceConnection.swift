@@ -161,6 +161,10 @@ final class AeroSpaceConnection {
         sendFrame(payload, on: connection)
 
         let work = DispatchWorkItem { [weak self] in
+            // Detach the request first: fail() -> close() completes whatever
+            // is still inFlight, and this request's completion must not run
+            // a second time with "connection closed".
+            self?.inFlight = nil
             request.completion(.failure(.failed("timed out")))
             self?.fail("request timed out: \(request.args.joined(separator: " "))")
         }
