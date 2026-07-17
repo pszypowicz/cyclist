@@ -184,6 +184,15 @@ enum Spaces {
         return real
     }
 
+    // windowsByNonVisibleSpace() inverted for per-window lookups.
+    static func nonVisibleSpaceByWindow() -> [Int: UInt64] {
+        var byWindow: [Int: UInt64] = [:]
+        for (space, windowIDs) in windowsByNonVisibleSpace() {
+            for id in windowIDs { byWindow[id] = space }
+        }
+        return byWindow
+    }
+
     // Make a specific window key through the WindowServer: front the process
     // with the target window, then post a synthetic left mouse down/up pair
     // addressed to the window by id, aimed just outside its frame so nothing

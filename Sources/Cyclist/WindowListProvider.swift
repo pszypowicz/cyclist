@@ -10,6 +10,14 @@ struct WindowItem {
     let aerospaceWorkspace: String?  // non-nil when parked in a hidden AeroSpace workspace
 }
 
+struct WindowSnapshot {
+    let items: [WindowItem]
+    // AX listed at least one window for the app. False means the sweep was
+    // blind (mid-transition timeout) - NOT that rows were merely filtered -
+    // which is what makes the controller's retry worthwhile.
+    let sawAXWindows: Bool
+}
+
 // Windows of a single app for the same-app cycling session, built on
 // SnapshotQueue from SnapshotInputs (the app and its display name are
 // resolved at keypress - session identity, not snapshot input). The AX API
@@ -19,17 +27,16 @@ struct WindowItem {
 // them, so cycling can jump between an app's windows across Spaces.
 enum WindowListProvider {
     static func snapshot(for app: NSRunningApplication, appName: String,
-                         inputs: SnapshotInputs) -> [WindowItem] {
+                         inputs: SnapshotInputs) -> WindowSnapshot {
         // AX can stale-list windows of a Space just left; carrying their real
         // Space lets the commit path navigate instead of fronting an app
         // whose window never appears.
-        var spaceByWindow: [Int: UInt64] = [:]
-        for (space, windowIDs) in Spaces.windowsByNonVisibleSpace() {
-            for id in windowIDs { spaceByWindow[id] = space }
-        }
+        let spaceByWindow = Spaces.nonVisibleSpaceByWindow()
         var items: [WindowItem] = []
         var seenByAX: Set<Int> = []
+        var sawAXWindows = false
         for window in AX.qualifiedWindows(pid: app.processIdentifier) {
+            sawAXWindows = true
             if let windowID = window.windowID {
                 seenByAX.insert(windowID)
             }
@@ -73,6 +80,7 @@ enum WindowListProvider {
         // Index 0 becomes the current window, so the session's start index
         // (1) is the most recent OTHER window and a quick Cmd+` bounces
         // between the last two.
-        return sortedByRecency(items, ranks: inputs.ranks, windowID: \.windowID)
+        return WindowSnapshot(items: sortedByRecency(items, ranks: inputs.ranks, windowID: \.windowID),
+                              sawAXWindows: sawAXWindows)
     }
 }
