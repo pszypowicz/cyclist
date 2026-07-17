@@ -114,9 +114,6 @@ struct SettingsView: View {
                     InfoDot("Cyclist keeps running without the icon. To get back here: hold the switcher open and press comma, or relaunch Cyclist - reopening the app always shows this window.")
                 }
             }
-            Button("Quit Cyclist") {
-                NSApp.terminate(nil)
-            }
         } header: {
             Text("General")
         } footer: {
