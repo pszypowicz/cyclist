@@ -103,10 +103,13 @@ defaults write io.github.pszypowicz.Cyclist switcherShortcut "alt+tab"
 | `showMenuBarIcon`         | bool   | `true`         |
 | `aerospaceIntegration`    | bool   | `false`        |
 | `showHollowWorkspaces`    | bool   | `false`        |
+| `demoHud`                 | bool   | `false`        |
 | `switcherShortcut`        | string | `cmd+tab`      |
 | `cycleWindowsShortcut`    | string | `cmd+backtick` |
 | `previousSpaceShortcut`   | string | `ctrl+left`    |
 | `nextSpaceShortcut`       | string | `ctrl+right`   |
+
+`demoHud` is for screen recordings: every hotkey press and trackpad swipe Cyclist acts on flashes briefly at the bottom of the screen (`⌃→`, `Swipe →`), and chain navigation adds the transition it performs as a second line (`workspace 2 → Safari (fullscreen)`). Keystroke visualizers cannot show these inputs - Cyclist consumes them before other apps see them.
 
 Shortcut strings are modifiers and a key joined with `+`: `cmd`, `alt`, `ctrl`, `shift` plus a key name (`tab`, `backtick`, `left`, `right`, `up`, `down`, `space`, `return`, a letter, a digit, ...). A binding needs at least one non-shift modifier (shift is the reverse key); a string that fails these rules is a hard error - Cyclist quits rather than silently reverting to a default, whether the bad write happens before launch or while it runs.
 
