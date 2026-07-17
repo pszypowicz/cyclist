@@ -29,25 +29,32 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 
 ## Keybindings
 
+Global - work anytime:
+
 | Keys                | Action                                        |
 | ------------------- | --------------------------------------------- |
 | Cmd+Tab (quick tap) | Switch to the previous window (any app)       |
-| Cmd+Tab (hold Cmd)  | Open the list; each Tab advances              |
-| Cmd+Shift+Tab       | Cycle backward                                |
+| Cmd+Tab (hold Cmd)  | Open the switcher list (Shift reverses)       |
 | Cmd+`               | Cycle windows of the frontmost app            |
-| Up/Down, K/J (open) | Move the selection                            |
-| Q (while open)      | Quit the selected app                         |
-| W (while open)      | Close the selected window                     |
-| Esc (while open)    | Cancel                                        |
-| Release Cmd         | Switch to the selected item                   |
 | Ctrl+Left / Right   | Previous / next workspace or fullscreen Space |
 | Trackpad swipe      | Previous / next workspace or fullscreen Space |
+
+While the switcher is open (Cmd held):
+
+| Keys            | Action                          |
+| --------------- | ------------------------------- |
+| Tab / Shift+Tab | Advance / reverse the selection |
+| Up/Down, K/J    | Move the selection              |
+| Q               | Quit the selected app           |
+| W               | Close the selected window       |
+| Esc             | Cancel                          |
+| Release Cmd     | Switch to the selected item     |
 
 Quit and Close keep the list open: the affected rows leave and the selection moves to a neighbor.
 
 ## Requirements
 
-- macOS 13 or later
+- macOS 26 (Tahoe)
 - **Accessibility** permission (System Settings > Privacy & Security > Accessibility) - required for the global Cmd+Tab hook and for reading window state
 - **Screen Recording** permission, optional but recommended - macOS gates the titles of windows in other Spaces behind it. Cyclist uses it only to read those titles; without it, other-Space rows show the last title Cyclist saw
 
