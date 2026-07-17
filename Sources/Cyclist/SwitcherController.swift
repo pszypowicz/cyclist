@@ -30,6 +30,13 @@ final class SwitcherController {
     // Guards pending completions: a snapshot that resolves after its session
     // was cancelled or superseded must not apply.
     private var snapshotGeneration = 0
+    // The newest generation that has applied (committed, or presented as
+    // the live session). The windows-snapshot retry can finish AFTER a
+    // newer generation committed; its parked pending commit is stale by
+    // then and replaying it would yank focus off the user's latest choice
+    // (#21). Chained quick taps still replay in order: each pending
+    // commit's generation exceeds everything applied before it.
+    private var appliedGeneration = 0
     // Pending sessions whose Cmd was already released: they commit when
     // their snapshot arrives. Kept outside `session` so the release keeps
     // its usual meaning - the session is over, Esc passes through again,
@@ -271,11 +278,16 @@ final class SwitcherController {
         // never showing the panel.
         if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
             let pending = pendingCommits.remove(at: pendingIndex)
+            guard generation > appliedGeneration else {
+                Log.write("stale pending commit dropped: generation \(generation) superseded")
+                return
+            }
             guard case .pendingApps(let presses) = pending.session else { return }
             guard !items.isEmpty else {
                 Log.write("apps snapshot empty; consumed Cmd+Tab dropped")
                 return
             }
+            appliedGeneration = generation
             activate(items[replay(presses, count: items.count,
                                   initial: initialAppsIndex(items: items, backward: presses[0]))])
             return
@@ -287,6 +299,7 @@ final class SwitcherController {
             session = nil
             return
         }
+        appliedGeneration = generation
         let index = replay(presses, count: items.count,
                            initial: initialAppsIndex(items: items, backward: presses[0]))
         session = .apps(items, index: index)
@@ -334,11 +347,16 @@ final class SwitcherController {
     private func finishWindowsSnapshot(_ items: [WindowItem], generation: Int) {
         if let pendingIndex = pendingCommits.firstIndex(where: { $0.generation == generation }) {
             let pending = pendingCommits.remove(at: pendingIndex)
+            guard generation > appliedGeneration else {
+                Log.write("stale pending commit dropped: generation \(generation) superseded")
+                return
+            }
             guard case .pendingWindows(let app, let presses) = pending.session else { return }
             guard !items.isEmpty else {
                 Log.write("window snapshot empty; consumed Cmd+` dropped")
                 return
             }
+            appliedGeneration = generation
             let item = items[replay(presses, count: items.count,
                                     initial: startIndex(count: items.count, backward: presses[0]))]
             focus(app: app, element: item.element, windowID: item.windowID,
@@ -352,6 +370,7 @@ final class SwitcherController {
             session = nil
             return
         }
+        appliedGeneration = generation
         let index = replay(presses, count: items.count,
                            initial: startIndex(count: items.count, backward: presses[0]))
         session = .windows(app, items, index: index)
