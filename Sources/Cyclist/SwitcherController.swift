@@ -4,8 +4,8 @@ import AppKit
 // default) starts an app session, the cycle binding (Cmd+`) a window
 // session for the frontmost app. While the binding's modifiers are held,
 // its key advances (Shift reverses), Esc cancels, and releasing a
-// modifier commits the current selection. Bindings live in the config
-// file and are read per event, so a rebind applies immediately.
+// modifier commits the current selection. Bindings come from the cached
+// shortcut store and are read per event, so a rebind applies immediately.
 final class SwitcherController {
     private let tap = EventTap()
     private let mru: MRUTracker
@@ -119,19 +119,20 @@ final class SwitcherController {
             return ShortcutRecorder.shared.consume(keyCode: keyCode, flags: flags)
         }
 
-        if Config.switcherShortcut.matches(keyCode: keyCode, flags: flags) {
+        let shortcuts = ShortcutSettings.shared
+        if shortcuts.switcher.matches(keyCode: keyCode, flags: flags) {
             advanceApps(backward: backward)
             return true
         }
-        if Config.cycleWindowsShortcut.matches(keyCode: keyCode, flags: flags) {
+        if shortcuts.cycleWindows.matches(keyCode: keyCode, flags: flags) {
             advanceWindows(backward: backward)
             return true
         }
         // Match before consulting the toggle: this branch runs for every
         // keystroke system-wide, and the UserDefaults read belongs on the
         // rare matched path, not the reject path.
-        let previousSpace = Config.previousSpaceShortcut.matches(keyCode: keyCode, flags: flags)
-        if previousSpace || Config.nextSpaceShortcut.matches(keyCode: keyCode, flags: flags),
+        let previousSpace = shortcuts.previousSpace.matches(keyCode: keyCode, flags: flags)
+        if previousSpace || shortcuts.nextSpace.matches(keyCode: keyCode, flags: flags),
            Settings.keyboardSpaceNav {
             // Space navigation, handled off the tap callback so nothing can
             // stall event delivery.
@@ -186,8 +187,8 @@ final class SwitcherController {
         // down; the first one released commits.
         let binding: Shortcut
         switch session {
-        case .apps, .pendingApps: binding = Config.switcherShortcut
-        case .windows, .pendingWindows: binding = Config.cycleWindowsShortcut
+        case .apps, .pendingApps: binding = ShortcutSettings.shared.switcher
+        case .windows, .pendingWindows: binding = ShortcutSettings.shared.cycleWindows
         }
         let required = binding.modifiers.subtracting(.shift)
         guard !Shortcut.normalized(event.flags).isSuperset(of: required) else { return }

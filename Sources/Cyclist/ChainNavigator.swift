@@ -193,7 +193,7 @@ final class ChainNavigator {
     // must remain reachable from a fullscreen Space.
     private func ringWorkspaces(_ display: DisplayInfo, host: UInt64) -> [String] {
         let all = aerospace.workspaces
-        if Config.showHollowWorkspaces { return all }
+        if Settings.showHollowWorkspaces { return all }
         var fullscreenResidents: Set<Int> = []
         for id in display.order where display.types[id] != 0 {
             fullscreenResidents.formUnion(Spaces.windowIDs(inSpace: id))
