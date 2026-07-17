@@ -183,19 +183,6 @@ enum Spaces {
         return real
     }
 
-    // The frontmost on-screen window the WindowServer counts as a real user
-    // window (the one holding focus). The plain CGWindowList realness filter
-    // is not enough: a fullscreen Space's slide-down toolbar is a layer-0,
-    // full-width, ~88pt window that passes it, so on such a Space the toolbar
-    // strip - not the content window - would read as topmost. The SLS tag
-    // filter rejects the strip, so this returns the window the user actually
-    // holds. nil when nothing on screen qualifies.
-    static func topOnScreenRealWindow() -> Int? {
-        let onScreen = CGWindows.real([.optionOnScreenOnly])
-        let real = realWindows(among: Set(onScreen.map(\.id)))
-        return onScreen.first { real.contains($0.id) }?.id
-    }
-
     // Make a specific window key through the WindowServer: front the process
     // with the target window, then post a synthetic left mouse down/up pair
     // addressed to the window by id, aimed just outside its frame so nothing
