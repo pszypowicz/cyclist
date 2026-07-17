@@ -45,10 +45,13 @@ struct SettingsView: View {
     @AppStorage(Settings.includeNoWindowsKey) private var includeNoWindows = false
     @AppStorage(Settings.trackpadSwipeKey) private var trackpadSwipe = true
     @AppStorage(Settings.keyboardSpaceNavKey) private var keyboardSpaceNav = true
+    @AppStorage(Settings.aerospaceIntegrationKey) private var aerospaceIntegration = false
+    @AppStorage(Settings.showHollowWorkspacesKey) private var showHollowWorkspaces = false
+    @AppStorage(Settings.switcherShortcutKey) private var switcherShortcut = "cmd+tab"
+    @AppStorage(Settings.cycleWindowsShortcutKey) private var cycleWindowsShortcut = "cmd+backtick"
+    @AppStorage(Settings.previousSpaceShortcutKey) private var previousSpaceShortcut = "ctrl+left"
+    @AppStorage(Settings.nextSpaceShortcutKey) private var nextSpaceShortcut = "ctrl+right"
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
-    @State private var aerospaceIntegration = Config.aerospaceIntegration
-    @State private var showHollowWorkspaces = Config.showHollowWorkspaces
-    @State private var shortcuts = Config.shortcuts
     @ObservedObject private var recorder = ShortcutRecorder.shared
 
     // Two side-by-side columns keep the window at a glanceable height;
@@ -72,11 +75,6 @@ struct SettingsView: View {
             .frame(maxHeight: .infinity)
         }
         .fixedSize()
-        .onReceive(NotificationCenter.default.publisher(for: Config.didChangeNotification)) { _ in
-            aerospaceIntegration = Config.aerospaceIntegration
-            showHollowWorkspaces = Config.showHollowWorkspaces
-            shortcuts = Config.shortcuts
-        }
         .onAppear {
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
@@ -151,19 +149,19 @@ struct SettingsView: View {
 
     private var shortcutsSection: some View {
         Section {
-            shortcutRow(key: "switcher",
+            shortcutRow(key: Settings.switcherShortcutKey, value: switcherShortcut,
                         info: "Opens the switcher. Hold the shortcut's modifiers to keep the list open; a quick tap returns to the previous window. Shift reverses the direction.")
-            shortcutRow(key: "cycle-windows",
+            shortcutRow(key: Settings.cycleWindowsShortcutKey, value: cycleWindowsShortcut,
                         info: "Cycles the windows of the frontmost app, including minimized ones and windows in other Spaces.")
-            shortcutRow(key: "previous-space",
+            shortcutRow(key: Settings.previousSpaceShortcutKey, value: previousSpaceShortcut,
                         info: "Steps to the previous Space or workspace on the active display.")
-            shortcutRow(key: "next-space",
+            shortcutRow(key: Settings.nextSpaceShortcutKey, value: nextSpaceShortcut,
                         info: "Steps to the next Space or workspace on the active display.")
         } header: {
             Text("Shortcuts")
         } footer: {
             Text(recorder.message
-                ?? "Click a shortcut, then press the new keys; Esc cancels. Recording needs Cyclist enabled.")
+                ?? "Click a shortcut, then press the new keys; Esc cancels.")
                 .font(.caption)
                 .foregroundStyle(recorder.message == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
         }
@@ -177,13 +175,6 @@ struct SettingsView: View {
                     InfoDot("Bridges to the AeroSpace tiling window manager over its socket: its workspaces join Ctrl+Left/Right navigation and windows parked in hidden workspaces get switcher rows. Requires AeroSpace running.")
                 }
             }
-            // No stale-value guard here: Config.values lags writes by the
-            // reload debounce, so comparing against it drops a rapid second
-            // toggle. A redundant same-value write (the resync path) is
-            // harmless - the reload's equality check ends the cycle.
-            .onChange(of: aerospaceIntegration) { newValue in
-                Config.set(section: "aerospace", key: "integration", to: newValue)
-            }
             Toggle(isOn: $showHollowWorkspaces) {
                 HStack(spacing: 4) {
                     Text("Show hollow workspaces")
@@ -191,24 +182,21 @@ struct SettingsView: View {
                 }
             }
             .disabled(!aerospaceIntegration)
-            .onChange(of: showHollowWorkspaces) { newValue in
-                Config.set(section: "aerospace", key: "show-hollow-workspaces", to: newValue)
-            }
         } header: {
             Text("AeroSpace (advanced)")
         } footer: {
-            Text("Stored in \(Config.displayPath); hand edits apply live.")
+            Text("Every setting is scriptable: defaults write io.github.pszypowicz.Cyclist (see the README).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
     }
 
-    private func shortcutRow(key: String, info: String) -> some View {
+    private func shortcutRow(key: String, value: String, info: String) -> some View {
         HStack(spacing: 4) {
             Text(ShortcutRecorder.labels[key] ?? key)
             InfoDot(info)
             Spacer()
-            Button(recorder.recordingKey == key ? "Press keys…" : (shortcuts[key]?.display ?? "?")) {
+            Button(recorder.recordingKey == key ? "Press keys…" : Shortcut.parse(value)!.display) {
                 recorder.begin(key: key)
             }
             .buttonStyle(.bordered)

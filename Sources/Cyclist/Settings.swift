@@ -1,5 +1,10 @@
 import Foundation
 
+// Every setting lives in standard user defaults, so the Settings window
+// and `defaults write io.github.pszypowicz.Cyclist ...` are the same
+// mechanism - external writes apply to the running app via KVO
+// (AppDelegate observes the AeroSpace key, whose flip has a side effect;
+// the shortcut store below re-parses its own).
 enum Settings {
     static let includeHiddenKey = "includeHidden"
     static let includeMinimizedKey = "includeMinimized"
@@ -7,7 +12,12 @@ enum Settings {
     static let includeNoWindowsKey = "includeNoWindows"
     static let trackpadSwipeKey = "trackpadSwipe"
     static let keyboardSpaceNavKey = "keyboardSpaceNavigation"
-    static let enabledKey = "enabled"
+    static let aerospaceIntegrationKey = "aerospaceIntegration"
+    static let showHollowWorkspacesKey = "showHollowWorkspaces"
+    static let switcherShortcutKey = "switcherShortcut"
+    static let cycleWindowsShortcutKey = "cycleWindowsShortcut"
+    static let previousSpaceShortcutKey = "previousSpaceShortcut"
+    static let nextSpaceShortcutKey = "nextSpaceShortcut"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -17,7 +27,12 @@ enum Settings {
             includeNoWindowsKey: false,
             trackpadSwipeKey: true,
             keyboardSpaceNavKey: true,
-            enabledKey: true,
+            aerospaceIntegrationKey: false,
+            showHollowWorkspacesKey: false,
+            switcherShortcutKey: "cmd+tab",
+            cycleWindowsShortcutKey: "cmd+backtick",
+            previousSpaceShortcutKey: "ctrl+left",
+            nextSpaceShortcutKey: "ctrl+right",
         ])
     }
 
@@ -45,7 +60,73 @@ enum Settings {
         UserDefaults.standard.bool(forKey: keyboardSpaceNavKey)
     }
 
-    static var enabled: Bool {
-        UserDefaults.standard.bool(forKey: enabledKey)
+    static var aerospaceIntegration: Bool {
+        UserDefaults.standard.bool(forKey: aerospaceIntegrationKey)
+    }
+
+    static var showHollowWorkspaces: Bool {
+        UserDefaults.standard.bool(forKey: showHollowWorkspacesKey)
+    }
+}
+
+// The shortcut bindings, parsed once and re-parsed when their defaults
+// change - parsing strings on the event-tap path would allocate per
+// keystroke system-wide. KVO sees external `defaults write` too, so
+// scripted rebinds apply live; the mutation hops to main because that is
+// where the tap callbacks read. An unparseable or modifier-less string
+// is a hard error: the recorder never writes one, so it can only come
+// from a bad `defaults write`, and failing fast beats silently stealing
+// a plain key or reverting to a default the user did not ask for.
+final class ShortcutSettings: NSObject {
+    static let shared = ShortcutSettings()
+
+    private(set) var switcher: Shortcut
+    private(set) var cycleWindows: Shortcut
+    private(set) var previousSpace: Shortcut
+    private(set) var nextSpace: Shortcut
+
+    // Keyed by defaults key - what the recorder's duplicate check walks.
+    var all: [String: Shortcut] {
+        [
+            Settings.switcherShortcutKey: switcher,
+            Settings.cycleWindowsShortcutKey: cycleWindows,
+            Settings.previousSpaceShortcutKey: previousSpace,
+            Settings.nextSpaceShortcutKey: nextSpace,
+        ]
+    }
+
+    private static let keys = [
+        Settings.switcherShortcutKey, Settings.cycleWindowsShortcutKey,
+        Settings.previousSpaceShortcutKey, Settings.nextSpaceShortcutKey,
+    ]
+
+    override private init() {
+        switcher = Self.read(Settings.switcherShortcutKey)
+        cycleWindows = Self.read(Settings.cycleWindowsShortcutKey)
+        previousSpace = Self.read(Settings.previousSpaceShortcutKey)
+        nextSpace = Self.read(Settings.nextSpaceShortcutKey)
+        super.init()
+        for key in Self.keys {
+            UserDefaults.standard.addObserver(self, forKeyPath: key, options: [], context: nil)
+        }
+    }
+
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?,
+                               change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
+        DispatchQueue.main.async { [self] in
+            switcher = Self.read(Settings.switcherShortcutKey)
+            cycleWindows = Self.read(Settings.cycleWindowsShortcutKey)
+            previousSpace = Self.read(Settings.previousSpaceShortcutKey)
+            nextSpace = Self.read(Settings.nextSpaceShortcutKey)
+        }
+    }
+
+    private static func read(_ key: String) -> Shortcut {
+        let string = UserDefaults.standard.string(forKey: key)!
+        guard let shortcut = Shortcut.parse(string),
+              !shortcut.modifiers.subtracting(.shift).isEmpty else {
+            fatalError("defaults key \(key) holds no usable shortcut: \"\(string)\"")
+        }
+        return shortcut
     }
 }

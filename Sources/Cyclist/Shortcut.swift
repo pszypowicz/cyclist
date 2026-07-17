@@ -2,7 +2,7 @@ import CoreGraphics
 
 // A recorded key combination: a keycode plus the exact set of held
 // modifiers. Serialized as "cmd+tab" (modifier names and a key name
-// joined with "+") in the config file; unknown keycodes round-trip as
+// joined with "+") in user defaults; unknown keycodes round-trip as
 // "code<N>" so any physical key stays recordable.
 struct Shortcut: Equatable {
     var keyCode: Int64
@@ -52,7 +52,7 @@ struct Shortcut: Equatable {
         return Shortcut(keyCode: keyCode, modifiers: modifiers)
     }
 
-    var configString: String {
+    var settingString: String {
         var tokens: [String] = []
         if modifiers.contains(.command) { tokens.append("cmd") }
         if modifiers.contains(.option) { tokens.append("alt") }

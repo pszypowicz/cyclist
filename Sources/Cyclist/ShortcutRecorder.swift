@@ -4,34 +4,34 @@ import Foundation
 
 // Captures the next key press through the app's own event tap - the only
 // place combos like Cmd+Tab are visible at all (they never reach a local
-// key monitor) - and stores it in the config file. While a recording is
+// key monitor) - and stores it in user defaults. While a recording is
 // active the tap hands every keyDown here and consumes it.
 final class ShortcutRecorder: ObservableObject {
     static let shared = ShortcutRecorder()
 
-    // Config key under [shortcuts] being recorded; nil when idle.
+    // Defaults key being recorded; nil when idle.
     @Published private(set) var recordingKey: String?
     @Published private(set) var message: String?
 
     static let labels: [String: String] = [
-        "switcher": "Open switcher",
-        "cycle-windows": "Cycle app windows",
-        "previous-space": "Previous Space",
-        "next-space": "Next Space",
+        Settings.switcherShortcutKey: "Open switcher",
+        Settings.cycleWindowsShortcutKey: "Cycle app windows",
+        Settings.previousSpaceShortcutKey: "Previous Space",
+        Settings.nextSpaceShortcutKey: "Next Space",
     ]
 
     var isRecording: Bool { recordingKey != nil }
 
     // Clicking the active row again cancels, so a recording started while
-    // the tap is down (Cyclist disabled) can always be backed out of.
+    // the tap is down (Accessibility revoked) can always be backed out of.
     func begin(key: String) {
         message = nil
         recordingKey = recordingKey == key ? nil : key
     }
 
-    // Also called when the Settings window closes or resigns key and when
-    // the taps tear down: an armed recording swallows every keyDown
-    // system-wide, so it must not outlive the UI that shows it.
+    // Also called when the Settings window closes or resigns key: an armed
+    // recording swallows every keyDown system-wide, so it must not outlive
+    // the UI that shows it.
     func cancel() {
         recordingKey = nil
     }
@@ -61,7 +61,7 @@ final class ShortcutRecorder: ObservableObject {
         // Compare shift-stripped, the same way matches() does: a stored
         // cmd+shift+tab and a recorded cmd+tab collide at match time even
         // though they are not equal.
-        for (otherKey, other) in Config.shortcuts where otherKey != key {
+        for (otherKey, other) in ShortcutSettings.shared.all where otherKey != key {
             if other.keyCode == shortcut.keyCode,
                other.modifiers.subtracting(.shift) == shortcut.modifiers {
                 message = "\(shortcut.display) is already \(Self.labels[otherKey] ?? otherKey)."
@@ -69,7 +69,7 @@ final class ShortcutRecorder: ObservableObject {
             }
         }
         recordingKey = nil
-        Config.set(section: "shortcuts", key: key, to: shortcut.configString)
-        Log.write("shortcut recorded: \(key) = \(shortcut.configString)")
+        UserDefaults.standard.set(shortcut.settingString, forKey: key)
+        Log.write("shortcut recorded: \(key) = \(shortcut.settingString)")
     }
 }
