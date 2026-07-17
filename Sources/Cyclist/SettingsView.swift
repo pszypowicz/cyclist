@@ -78,8 +78,14 @@ struct SettingsView: View {
             shortcuts = Config.shortcuts
         }
         .onAppear {
-            // System Settings > General > Login Items is a second writer of
-            // this state; re-read whenever the window comes up.
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+        // System Settings > General > Login Items is a second writer of the
+        // login-item state and SMAppService offers no change notification,
+        // so it is re-read at the moments the user can next see the toggle:
+        // flipping it over there deactivates this app, and both returning
+        // here and reopening the window activate it again.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
     }
