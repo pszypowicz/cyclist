@@ -146,10 +146,6 @@ struct SettingsView: View {
             }
         } header: {
             Text("General")
-        } footer: {
-            Text("Launch at Login is a macOS login item; also listed in System Settings > General > Login Items.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -239,10 +235,6 @@ struct SettingsView: View {
             .disabled(!aerospaceIntegration)
         } header: {
             Text("AeroSpace (advanced)")
-        } footer: {
-            Text("Every setting is scriptable: defaults write cz.szypowi.cyclist (see the README).")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
