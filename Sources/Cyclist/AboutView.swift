@@ -1,12 +1,22 @@
 import SwiftUI
 
+// The hash traces any installed binary to its exact commit; debug
+// builds add the build date.
+func formatVersion(base: String) -> String {
+    #if DEBUG
+    return "\(base) (\(BuildMetadata.gitHash) \(BuildMetadata.buildDate))"
+    #else
+    return "\(base) (\(BuildMetadata.gitHash))"
+    #endif
+}
+
 private let repoURL = URL(string: "https://github.com/pszypowicz/cyclist")!
 private let sponsorURL = URL(string: "https://github.com/sponsors/pszypowicz")!
 
 struct AboutView: View {
     private let version: String = {
         let base = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
-        return "\(base) (beta)"
+        return formatVersion(base: base)
     }()
 
     var body: some View {
