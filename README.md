@@ -59,7 +59,7 @@ In the app switcher, Quit and Close keep the list open: the affected rows leave 
 ## Requirements
 
 - macOS 26 (Tahoe)
-- **Accessibility** permission (System Settings > Privacy & Security > Accessibility) - required for the global Cmd+Tab hook and for reading window state
+- **Accessibility** permission (System Settings > Privacy & Security > Accessibility) - required for the global Cmd+Tab hook and for reading window state. While it is missing, Settings shows a warning with a jump straight to the pane
 - **Screen Recording** permission, optional and off by default - macOS gates the titles of windows in other Spaces behind it, but titles seen while a window was visible are cached, so day-to-day the cache covers those rows; the permission only adds titles for windows not seen since boot. Enable "Live titles from other Spaces" in Settings to use it (Cyclist never requests the permission while the toggle is off); the actual grant is the + button in the Screen Recording pane, and Settings links straight there while the grant is missing
 
 ## Install
