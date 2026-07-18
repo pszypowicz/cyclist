@@ -135,7 +135,7 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                     Spacer()
-                    Button("Open System Settings") {
+                    Button("Request Access") {
                         requestScreenRecording()
                     }
                     .controlSize(.small)
@@ -255,14 +255,30 @@ struct SettingsView: View {
         }
     }
 
-    // The system permission prompt shows at most once ever per app;
-    // after that CGRequestScreenCaptureAccess is a silent no-op, so the
-    // Screen Recording pane - opened directly - is the reliable path.
+    // The system permission prompt shows at most once per TCC state;
+    // resetting this app's own ScreenCapture entry (unprivileged) re-arms
+    // it, so the request genuinely prompts again - and registers Cyclist
+    // in the pane's app list. The guard keeps the reset from ever
+    // touching a live grant; a refused reset falls back to opening the
+    // pane directly.
     private func requestScreenRecording() {
         guard !CGPreflightScreenCaptureAccess() else { return }
-        CGRequestScreenCaptureAccess()
-        NSWorkspace.shared.open(URL(string:
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+        let reset = Process()
+        reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        reset.arguments = ["reset", "ScreenCapture",
+                           Bundle.main.bundleIdentifier ?? "cz.szypowi.cyclist"]
+        var rearmed = false
+        if (try? reset.run()) != nil {
+            reset.waitUntilExit()
+            rearmed = reset.terminationStatus == 0
+        }
+        if rearmed {
+            CGRequestScreenCaptureAccess()
+        } else {
+            Log.write("screen recording: tccutil reset refused; opening the pane instead")
+            NSWorkspace.shared.open(URL(string:
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+        }
     }
 
     // Native login item via SMAppService: the app appears in System
