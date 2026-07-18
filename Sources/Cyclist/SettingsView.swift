@@ -212,7 +212,7 @@ struct SettingsView: View {
         } header: {
             Text("AeroSpace (advanced)")
         } footer: {
-            Text("Every setting is scriptable: defaults write io.github.pszypowicz.Cyclist (see the README).")
+            Text("Every setting is scriptable: defaults write cz.szypowi.cyclist (see the README).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

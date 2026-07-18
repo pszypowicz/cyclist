@@ -1,7 +1,7 @@
 import Foundation
 
 // Every setting lives in standard user defaults, so the Settings window
-// and `defaults write io.github.pszypowicz.Cyclist ...` are the same
+// and `defaults write cz.szypowi.cyclist ...` are the same
 // mechanism - external writes apply to the running app via KVO
 // (AppDelegate observes the keys with side effects - the AeroSpace
 // bridge and the menu bar icon; the shortcut store below re-parses its

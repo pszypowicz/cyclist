@@ -5,13 +5,13 @@ import os
 // default level and are always persisted. Diagnostic lines log at debug
 // level, which the logging system discards for free until collection is
 // armed:
-//   log stream --level debug --predicate 'subsystem == "io.github.pszypowicz.Cyclist"'
+//   log stream --level debug --predicate 'subsystem == "cz.szypowi.cyclist"'
 // or persistently:
-//   sudo log config --subsystem io.github.pszypowicz.Cyclist --mode "level:debug,persist:debug"
+//   sudo log config --subsystem cz.szypowi.cyclist --mode "level:debug,persist:debug"
 // Diagnostic-only WORK (pixel checks and the like) must also gate on
 // `debugEnabled` so it costs nothing while collection is off.
 enum Log {
-    private static let subsystem = Bundle.main.bundleIdentifier ?? "io.github.pszypowicz.Cyclist"
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "cz.szypowi.cyclist"
     private static let appLog = OSLog(subsystem: subsystem, category: "app")
     private static let diagnosticsLog = OSLog(subsystem: subsystem, category: "diagnostics")
     private static let app = Logger(appLog)

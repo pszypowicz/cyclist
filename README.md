@@ -86,11 +86,11 @@ On first launch Cyclist prompts for Accessibility permission and activates itsel
 
 ## Configuration
 
-Every setting lives in standard user defaults under the `io.github.pszypowicz.Cyclist` domain - the Settings window and `defaults write` are the same mechanism, and external writes apply to a running Cyclist immediately:
+Every setting lives in standard user defaults under the `cz.szypowi.cyclist` domain - the Settings window and `defaults write` are the same mechanism, and external writes apply to a running Cyclist immediately:
 
 ```sh
-defaults write io.github.pszypowicz.Cyclist aerospaceIntegration -bool true
-defaults write io.github.pszypowicz.Cyclist switcherShortcut "alt+tab"
+defaults write cz.szypowi.cyclist aerospaceIntegration -bool true
+defaults write cz.szypowi.cyclist switcherShortcut "alt+tab"
 ```
 
 | Key                       | Type   | Default        |
