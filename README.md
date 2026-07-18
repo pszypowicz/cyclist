@@ -6,7 +6,7 @@
 
 A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots - just a list of app icons, names, and window titles you cycle through with Cmd+Tab.
 
-> **Beta.** Cyclist is in early development (0.x). Expect rough edges and breaking changes between releases.
+> **Beta:** Cyclist is pre-1.0. Backward compatibility is not guaranteed until version 1.0.0 is reached.
 
 <p align="center">
   <img src="docs/demo.svg" width="830" alt="Hold Cmd to open a vertical text list where every window is its own row, some tagged 'other space'; move the selection to a Safari window that lives in a fullscreen Space, release Cmd, and the display jumps straight to that Space.">
