@@ -10,7 +10,8 @@ Usage: scripts/build-app.sh [--configuration debug|release] [--identity <substri
 Flags:
   --configuration     Swift build configuration: debug or release (default: release)
   --identity          Codesign identity, matched as a substring against
-                      'security find-identity' output (default: "Apple Development").
+                      'security find-identity' output (default: "Developer ID
+                      Application", falling back to "Apple Development").
                       Pass "adhoc" to ad-hoc sign; note that ad-hoc builds lose
                       the Accessibility grant on every rebuild.
   --hardened-runtime  Sign with the hardened runtime and a secure timestamp,
@@ -25,7 +26,7 @@ EOF
 }
 
 configuration=release
-identity="Apple Development"
+identity=""
 hardened=false
 output=build
 
@@ -62,11 +63,25 @@ cp "$bin" "$app/Contents/MacOS/Cyclist"
 if [[ "$identity" == "adhoc" ]]; then
   sign="-"
 else
-  # || true: with set -e, a failing security query (locked/absent keychain)
-  # would abort here and skip the ad-hoc fallback below.
-  sign="$(security find-identity -v -p codesigning | awk -v id="$identity" '$0 ~ id {print $2; exit}' || true)"
+  # Default preference order puts the release identity first: TCC grants
+  # embed the signing certificate's requirements, so a dev build signed
+  # with a different certificate than the installed release drops the
+  # Accessibility grant on every swap.
+  candidates=("Developer ID Application" "Apple Development")
+  if [[ -n "$identity" ]]; then
+    candidates=("$identity")
+  fi
+  sign=""
+  for candidate in "${candidates[@]}"; do
+    # || true: with set -e, a failing security query (locked/absent
+    # keychain) would abort here and skip the ad-hoc fallback below.
+    sign="$(security find-identity -v -p codesigning | awk -v id="$candidate" '$0 ~ id {print $2; exit}' || true)"
+    if [[ -n "$sign" ]]; then
+      break
+    fi
+  done
   if [[ -z "$sign" ]]; then
-    echo "No codesigning identity matching '$identity'; falling back to ad-hoc." >&2
+    echo "No codesigning identity matching '${candidates[*]}'; falling back to ad-hoc." >&2
     sign="-"
   fi
 fi
