@@ -60,7 +60,7 @@ In the app switcher, Quit and Close keep the list open: the affected rows leave 
 
 - macOS 26 (Tahoe)
 - **Accessibility** permission (System Settings > Privacy & Security > Accessibility) - required for the global Cmd+Tab hook and for reading window state
-- **Screen Recording** permission, optional but recommended - macOS gates the titles of windows in other Spaces behind it. Cyclist uses it only to read those titles; without it, other-Space rows show the last title Cyclist saw. The "Live titles from other Spaces" toggle controls the feature: with it off, Cyclist never requests the permission, and while the grant is missing Settings offers a Request Access button that re-arms and re-runs the system permission prompt
+- **Screen Recording** permission, optional but recommended - macOS gates the titles of windows in other Spaces behind it. Cyclist uses it only to read those titles; without it, other-Space rows show the last title Cyclist saw. The "Live titles from other Spaces" toggle controls the feature: with it off, Cyclist never requests the permission. Enabling it raises the system's request dialog; the actual grant is the + button in the Screen Recording pane (which lists only granted apps), and Settings links straight there while the grant is missing
 
 ## Install
 
