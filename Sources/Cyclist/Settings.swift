@@ -33,7 +33,7 @@ enum Settings {
             includeMinimizedKey: true,
             includeOtherSpacesKey: true,
             includeNoWindowsKey: false,
-            liveOtherSpaceTitlesKey: true,
+            liveOtherSpaceTitlesKey: false,
             trackpadSwipeKey: true,
             keyboardSpaceNavKey: true,
             showMenuBarIconKey: true,

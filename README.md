@@ -60,7 +60,7 @@ In the app switcher, Quit and Close keep the list open: the affected rows leave 
 
 - macOS 26 (Tahoe)
 - **Accessibility** permission (System Settings > Privacy & Security > Accessibility) - required for the global Cmd+Tab hook and for reading window state
-- **Screen Recording** permission, optional but recommended - macOS gates the titles of windows in other Spaces behind it. Cyclist uses it only to read those titles; without it, other-Space rows show the last title Cyclist saw. The "Live titles from other Spaces" toggle controls the feature: with it off, Cyclist never requests the permission. The actual grant is the + button in the Screen Recording pane (which lists only granted apps), and Settings links straight there while the grant is missing
+- **Screen Recording** permission, optional and off by default - macOS gates the titles of windows in other Spaces behind it, but titles seen while a window was visible are cached, so day-to-day the cache covers those rows; the permission only adds titles for windows not seen since boot. Enable "Live titles from other Spaces" in Settings to use it (Cyclist never requests the permission while the toggle is off); the actual grant is the + button in the Screen Recording pane, and Settings links straight there while the grant is missing
 
 ## Install
 
@@ -105,7 +105,7 @@ defaults write cz.szypowi.cyclist switcherShortcut "alt+tab"
 | `includeMinimized`        | bool   | `true`         |
 | `includeOtherSpaces`      | bool   | `true`         |
 | `includeNoWindows`        | bool   | `false`        |
-| `liveOtherSpaceTitles`    | bool   | `true`         |
+| `liveOtherSpaceTitles`    | bool   | `false`        |
 | `trackpadSwipe`           | bool   | `true`         |
 | `keyboardSpaceNavigation` | bool   | `true`         |
 | `showMenuBarIcon`         | bool   | `true`         |

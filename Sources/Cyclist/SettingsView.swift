@@ -44,7 +44,7 @@ struct SettingsView: View {
     @AppStorage(Settings.includeMinimizedKey) private var includeMinimized = true
     @AppStorage(Settings.includeOtherSpacesKey) private var includeOtherSpaces = true
     @AppStorage(Settings.includeNoWindowsKey) private var includeNoWindows = false
-    @AppStorage(Settings.liveOtherSpaceTitlesKey) private var liveOtherSpaceTitles = true
+    @AppStorage(Settings.liveOtherSpaceTitlesKey) private var liveOtherSpaceTitles = false
     @AppStorage(Settings.trackpadSwipeKey) private var trackpadSwipe = true
     @AppStorage(Settings.keyboardSpaceNavKey) private var keyboardSpaceNav = true
     @AppStorage(Settings.showMenuBarIconKey) private var showMenuBarIcon = true
