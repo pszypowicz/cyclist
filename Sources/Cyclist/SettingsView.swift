@@ -44,6 +44,7 @@ struct SettingsView: View {
     @AppStorage(Settings.includeMinimizedKey) private var includeMinimized = true
     @AppStorage(Settings.includeOtherSpacesKey) private var includeOtherSpaces = true
     @AppStorage(Settings.includeNoWindowsKey) private var includeNoWindows = false
+    @AppStorage(Settings.liveOtherSpaceTitlesKey) private var liveOtherSpaceTitles = true
     @AppStorage(Settings.trackpadSwipeKey) private var trackpadSwipe = true
     @AppStorage(Settings.keyboardSpaceNavKey) private var keyboardSpaceNav = true
     @AppStorage(Settings.showMenuBarIconKey) private var showMenuBarIcon = true
@@ -54,6 +55,7 @@ struct SettingsView: View {
     @AppStorage(Settings.previousSpaceShortcutKey) private var previousSpaceShortcut = "ctrl+left"
     @AppStorage(Settings.nextSpaceShortcutKey) private var nextSpaceShortcut = "ctrl+right"
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var screenRecordingGranted = CGPreflightScreenCaptureAccess()
     @ObservedObject private var recorder = ShortcutRecorder.shared
 
     // Two side-by-side columns keep the window at a glanceable height;
@@ -80,14 +82,16 @@ struct SettingsView: View {
         .fixedSize()
         .onAppear {
             launchAtLogin = SMAppService.mainApp.status == .enabled
+            screenRecordingGranted = CGPreflightScreenCaptureAccess()
         }
-        // System Settings > General > Login Items is a second writer of the
-        // login-item state and SMAppService offers no change notification,
-        // so it is re-read at the moments the user can next see the toggle:
-        // flipping it over there deactivates this app, and both returning
-        // here and reopening the window activate it again.
+        // System Settings is a second writer of the login-item and Screen
+        // Recording state, and neither offers a change notification, so
+        // both are re-read at the moments the user can next see them:
+        // changing them over there deactivates this app, and both
+        // returning here and reopening the window activate it again.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             launchAtLogin = SMAppService.mainApp.status == .enabled
+            screenRecordingGranted = CGPreflightScreenCaptureAccess()
         }
         // An armed recording swallows every keyDown system-wide; it must
         // die with the window that shows it, or closing (or just clicking
@@ -114,6 +118,27 @@ struct SettingsView: View {
                 HStack(spacing: 4) {
                     Text("Show menu bar icon")
                     InfoDot("Cyclist keeps running without the icon. To get back here: hold the switcher open and press comma, or relaunch Cyclist - reopening the app always shows this window.")
+                }
+            }
+            Toggle(isOn: $liveOtherSpaceTitles) {
+                HStack(spacing: 4) {
+                    Text("Live titles from other Spaces")
+                    InfoDot("Reads the titles of windows in other Spaces (fullscreen included) through the Screen Recording permission - titles only, never window contents. Off, those rows show the last title Cyclist saw, and Cyclist never requests the permission.")
+                }
+            }
+            .onChange(of: liveOtherSpaceTitles) { on in
+                if on { requestScreenRecording() }
+            }
+            if liveOtherSpaceTitles, !screenRecordingGranted {
+                HStack(spacing: 4) {
+                    Text("Screen Recording is not granted.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Spacer()
+                    Button("Open System Settings") {
+                        requestScreenRecording()
+                    }
+                    .controlSize(.small)
                 }
             }
         } header: {
@@ -228,6 +253,16 @@ struct SettingsView: View {
             }
             .buttonStyle(.bordered)
         }
+    }
+
+    // The system permission prompt shows at most once ever per app;
+    // after that CGRequestScreenCaptureAccess is a silent no-op, so the
+    // Screen Recording pane - opened directly - is the reliable path.
+    private func requestScreenRecording() {
+        guard !CGPreflightScreenCaptureAccess() else { return }
+        CGRequestScreenCaptureAccess()
+        NSWorkspace.shared.open(URL(string:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
     }
 
     // Native login item via SMAppService: the app appears in System

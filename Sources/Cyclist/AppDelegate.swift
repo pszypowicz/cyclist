@@ -38,10 +38,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Optional: unlocks live titles for windows in other Spaces via
         // CGWindowList. Used solely to read titles; Cyclist never captures
         // window contents. Without it, last-seen titles are used instead.
-        let screenRecording = CGPreflightScreenCaptureAccess()
-        Log.write("startup: screen recording \(screenRecording ? "granted" : "not granted")")
-        if !screenRecording {
-            CGRequestScreenCaptureAccess()
+        // Gated on the feature toggle, so a user who leaves it off is
+        // never asked for the permission.
+        if Settings.liveOtherSpaceTitles {
+            let screenRecording = CGPreflightScreenCaptureAccess()
+            Log.write("startup: screen recording \(screenRecording ? "granted" : "not granted")")
+            if !screenRecording {
+                CGRequestScreenCaptureAccess()
+            }
+        } else {
+            Log.write("startup: live titles off; screen recording not requested")
         }
     }
 
