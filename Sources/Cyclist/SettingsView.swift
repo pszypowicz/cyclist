@@ -55,6 +55,7 @@ struct SettingsView: View {
     @AppStorage(Settings.previousSpaceShortcutKey) private var previousSpaceShortcut = "ctrl+left"
     @AppStorage(Settings.nextSpaceShortcutKey) private var nextSpaceShortcut = "ctrl+right"
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var accessibilityGranted = AXIsProcessTrusted()
     @State private var screenRecordingGranted = CGPreflightScreenCaptureAccess()
     @ObservedObject private var recorder = ShortcutRecorder.shared
 
@@ -82,15 +83,17 @@ struct SettingsView: View {
         .fixedSize()
         .onAppear {
             launchAtLogin = SMAppService.mainApp.status == .enabled
+            accessibilityGranted = AXIsProcessTrusted()
             screenRecordingGranted = CGPreflightScreenCaptureAccess()
         }
-        // System Settings is a second writer of the login-item and Screen
-        // Recording state, and neither offers a change notification, so
-        // both are re-read at the moments the user can next see them:
-        // changing them over there deactivates this app, and both
+        // System Settings is a second writer of the login-item and
+        // permission state, and none of it offers a change notification,
+        // so everything is re-read at the moments the user can next see
+        // it: changing them over there deactivates this app, and both
         // returning here and reopening the window activate it again.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             launchAtLogin = SMAppService.mainApp.status == .enabled
+            accessibilityGranted = AXIsProcessTrusted()
             screenRecordingGranted = CGPreflightScreenCaptureAccess()
         }
         // An armed recording swallows every keyDown system-wide; it must
@@ -110,6 +113,21 @@ struct SettingsView: View {
 
     private var generalSection: some View {
         Section {
+            // Accessibility is the one permission Cyclist cannot run
+            // without; the launch prompt registers the row in the pane,
+            // so unlike Screen Recording there is a toggle waiting there.
+            if !accessibilityGranted {
+                HStack(spacing: 4) {
+                    Text("Accessibility is not granted - every hotkey is inactive.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Spacer()
+                    Button("Open Pane") {
+                        openPrivacyPane("Privacy_Accessibility")
+                    }
+                    .controlSize(.small)
+                }
+            }
             Toggle(isOn: $launchAtLogin) {
                 Label("Launch at Login", systemImage: "power")
             }
@@ -138,8 +156,7 @@ struct SettingsView: View {
                         .foregroundStyle(.orange)
                     Spacer()
                     Button("Open Pane") {
-                        NSWorkspace.shared.open(URL(string:
-                            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                        openPrivacyPane("Privacy_ScreenCapture")
                     }
                     .controlSize(.small)
                 }
@@ -248,6 +265,11 @@ struct SettingsView: View {
             }
             .buttonStyle(.bordered)
         }
+    }
+
+    private func openPrivacyPane(_ anchor: String) {
+        NSWorkspace.shared.open(URL(string:
+            "x-apple.systempreferences:com.apple.preference.security?\(anchor)")!)
     }
 
     // Native login item via SMAppService: the app appears in System
