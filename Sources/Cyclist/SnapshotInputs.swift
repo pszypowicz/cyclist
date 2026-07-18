@@ -10,7 +10,7 @@ import AppKit
 // the reverse direction would deadlock.
 enum SnapshotQueue {
     static let shared = DispatchQueue(
-        label: "io.github.pszypowicz.Cyclist.snapshot", qos: .userInteractive)
+        label: "cz.szypowi.cyclist.snapshot", qos: .userInteractive)
 }
 
 // One app row of the capture: identity plus the mutable
