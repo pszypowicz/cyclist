@@ -1,11 +1,15 @@
 #!/usr/bin/env swift
 import AppKit
 
-// Renders the DMG installer window background: a dark gradient with an
-// arrow from the app icon position to the Applications-folder position
-// and a one-line drag hint. Emits a two-page HiDPI TIFF (1x + 2x via
-// tiffutil) so Finder draws it crisply on Retina displays. Positions
-// must match the --icon/--app-drop-link coordinates in package-dmg.sh.
+// Renders the DMG installer window background: a transparent canvas
+// with an arrow from the app icon position to the Applications-folder
+// position and a one-line drag hint, so Finder's own light or dark
+// window shows through. The glyphs are mid-gray with a thin dark
+// outline and a soft white halo - the outline carries them on a light
+// background, the halo on a dark one. Emits a two-page HiDPI TIFF
+// (1x + 2x via tiffutil) so Finder draws it crisply on Retina
+// displays. Positions must match the --icon/--app-drop-link
+// coordinates in package-dmg.sh.
 
 func usage() {
     print("""
@@ -60,35 +64,46 @@ func draw(scale: CGFloat) -> NSBitmapImageRep {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
 
-    let gradient = NSGradient(
-        starting: NSColor(calibratedRed: 0.10, green: 0.11, blue: 0.14, alpha: 1),
-        ending: NSColor(calibratedRed: 0.04, green: 0.045, blue: 0.06, alpha: 1)
-    )!
-    gradient.draw(in: NSRect(origin: .zero, size: size), angle: -90)
+    let fill = NSColor(white: 0.5, alpha: 1)
+    let outline = NSColor(white: 0, alpha: 0.4)
+    let halo = NSShadow()
+    halo.shadowColor = NSColor(white: 1, alpha: 0.85)
+    halo.shadowBlurRadius = 3
+    halo.shadowOffset = .zero
 
-    // Arrow between the two icon positions, clear of both 128pt icons.
-    let arrowColor = NSColor.white.withAlphaComponent(0.55)
-    arrowColor.setStroke()
-    arrowColor.setFill()
+    // One closed path for the whole arrow so outline and halo wrap it as
+    // a single shape, clear of both 128pt icons.
     let start = NSPoint(x: appIconCenter.x + iconHalf + 24, y: appIconCenter.y)
     let end = NSPoint(x: dropLinkCenter.x - iconHalf - 24, y: dropLinkCenter.y)
-    let shaft = NSBezierPath()
-    shaft.move(to: start)
-    shaft.line(to: NSPoint(x: end.x - 18, y: end.y))
-    shaft.lineWidth = 5
-    shaft.lineCapStyle = .round
-    shaft.stroke()
-    let head = NSBezierPath()
-    head.move(to: end)
-    head.line(to: NSPoint(x: end.x - 22, y: end.y + 13))
-    head.line(to: NSPoint(x: end.x - 22, y: end.y - 13))
-    head.close()
-    head.fill()
+    let half: CGFloat = 2.5
+    let arrow = NSBezierPath()
+    arrow.move(to: NSPoint(x: start.x, y: start.y + half))
+    arrow.line(to: NSPoint(x: end.x - 22, y: end.y + half))
+    arrow.line(to: NSPoint(x: end.x - 22, y: end.y + 13))
+    arrow.line(to: end)
+    arrow.line(to: NSPoint(x: end.x - 22, y: end.y - 13))
+    arrow.line(to: NSPoint(x: end.x - 22, y: end.y - half))
+    arrow.line(to: NSPoint(x: start.x, y: start.y - half))
+    arrow.close()
+
+    NSGraphicsContext.current?.saveGraphicsState()
+    halo.set()
+    fill.setFill()
+    arrow.fill()
+    NSGraphicsContext.current?.restoreGraphicsState()
+    outline.setStroke()
+    arrow.lineWidth = 1
+    arrow.stroke()
 
     let hint = "Drag Cyclist into Applications"
     let attributes: [NSAttributedString.Key: Any] = [
-        .font: NSFont.systemFont(ofSize: 15, weight: .medium),
-        .foregroundColor: NSColor.white.withAlphaComponent(0.6),
+        .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
+        .foregroundColor: fill,
+        // Negative width strokes AND fills; the outline is what keeps
+        // the text readable over a light window.
+        .strokeWidth: -1.5,
+        .strokeColor: outline,
+        .shadow: halo,
     ]
     let text = NSAttributedString(string: hint, attributes: attributes)
     let textSize = text.size()
