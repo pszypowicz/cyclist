@@ -36,7 +36,10 @@ enum CGWindows {
             guard let bounds = realBounds(info),
                   let windowID = info[kCGWindowNumber as String] as? Int,
                   let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
-            let name = info[kCGWindowName as String] as? String
+            // Off, the live-titles feature behaves exactly like the
+            // Screen Recording permission being absent: titles stay nil
+            // and consumers fall back to the last title seen.
+            let name = Settings.liveOtherSpaceTitles ? info[kCGWindowName as String] as? String : nil
             result.append(CGWindowInfoLite(
                 id: windowID,
                 pid: pid,

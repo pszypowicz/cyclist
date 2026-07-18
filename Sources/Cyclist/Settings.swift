@@ -13,6 +13,7 @@ enum Settings {
     static let includeMinimizedKey = "includeMinimized"
     static let includeOtherSpacesKey = "includeOtherSpaces"
     static let includeNoWindowsKey = "includeNoWindows"
+    static let liveOtherSpaceTitlesKey = "liveOtherSpaceTitles"
     static let trackpadSwipeKey = "trackpadSwipe"
     static let keyboardSpaceNavKey = "keyboardSpaceNavigation"
     static let showMenuBarIconKey = "showMenuBarIcon"
@@ -32,6 +33,7 @@ enum Settings {
             includeMinimizedKey: true,
             includeOtherSpacesKey: true,
             includeNoWindowsKey: false,
+            liveOtherSpaceTitlesKey: true,
             trackpadSwipeKey: true,
             keyboardSpaceNavKey: true,
             showMenuBarIconKey: true,
@@ -67,6 +69,10 @@ enum Settings {
 
     static var includeNoWindows: Bool {
         UserDefaults.standard.bool(forKey: includeNoWindowsKey)
+    }
+
+    static var liveOtherSpaceTitles: Bool {
+        UserDefaults.standard.bool(forKey: liveOtherSpaceTitlesKey)
     }
 
     static var trackpadSwipe: Bool {
