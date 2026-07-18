@@ -80,7 +80,7 @@ cp -R build/Cyclist.app /Applications/
 open /Applications/Cyclist.app
 ```
 
-The build script signs with your "Apple Development" certificate when one is present so the Accessibility grant survives rebuilds. See `scripts/build-app.sh --help` for options.
+The build script signs with your "Developer ID Application" certificate - the same identity releases use, so the Accessibility grant survives rebuilds and release installs alike. Without one, pass `--identity "Apple Development"` or `--identity adhoc` explicitly; a missing identity is a hard error, never a silent downgrade. See `scripts/build-app.sh --help` for options.
 
 On first launch Cyclist prompts for Accessibility permission and activates itself once granted. It lives in the menu bar (no Dock icon); the menu holds Settings, About, and Quit - quitting is how every hook releases and the native shortcuts return. The Settings window holds the list options, trackpad swipe navigation, and a native Launch at Login toggle (registers with System Settings > General > Login Items). The menu bar icon itself is optional (Settings > General): with it hidden, hold the switcher open and press `,` to reach Settings, or just relaunch Cyclist - reopening the app always presents the Settings window (where Cmd+Q still quits).
 

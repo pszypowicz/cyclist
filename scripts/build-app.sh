@@ -11,9 +11,12 @@ Flags:
   --configuration     Swift build configuration: debug or release (default: release)
   --identity          Codesign identity, matched as a substring against
                       'security find-identity' output (default: "Developer ID
-                      Application", falling back to "Apple Development").
-                      Pass "adhoc" to ad-hoc sign; note that ad-hoc builds lose
-                      the Accessibility grant on every rebuild.
+                      Application", the release identity - builds signed with
+                      it keep the TCC Accessibility grant across release
+                      installs). No fallback: a missing match is a hard error,
+                      never a silently different signature. Pass "adhoc" to
+                      ad-hoc sign; note that ad-hoc builds lose the
+                      Accessibility grant on every rebuild.
   --hardened-runtime  Sign with the hardened runtime and a secure timestamp,
                       as notarization requires. Needs network (timestamp
                       service) and a real identity.
@@ -26,7 +29,7 @@ EOF
 }
 
 configuration=release
-identity=""
+identity="Developer ID Application"
 hardened=false
 output=build
 
@@ -63,26 +66,14 @@ cp "$bin" "$app/Contents/MacOS/Cyclist"
 if [[ "$identity" == "adhoc" ]]; then
   sign="-"
 else
-  # Default preference order puts the release identity first: TCC grants
-  # embed the signing certificate's requirements, so a dev build signed
-  # with a different certificate than the installed release drops the
-  # Accessibility grant on every swap.
-  candidates=("Developer ID Application" "Apple Development")
-  if [[ -n "$identity" ]]; then
-    candidates=("$identity")
-  fi
-  sign=""
-  for candidate in "${candidates[@]}"; do
-    # || true: with set -e, a failing security query (locked/absent
-    # keychain) would abort here and skip the ad-hoc fallback below.
-    sign="$(security find-identity -v -p codesigning | awk -v id="$candidate" '$0 ~ id {print $2; exit}' || true)"
-    if [[ -n "$sign" ]]; then
-      break
-    fi
-  done
+  # || true: with set -e, a failing security query (locked/absent
+  # keychain) would abort before the explicit error below.
+  sign="$(security find-identity -v -p codesigning | awk -v id="$identity" '$0 ~ id {print $2; exit}' || true)"
   if [[ -z "$sign" ]]; then
-    echo "No codesigning identity matching '${candidates[*]}'; falling back to ad-hoc." >&2
-    sign="-"
+    echo "error: no codesigning identity matching '$identity'" >&2
+    echo "List identities with: security find-identity -v -p codesigning" >&2
+    echo "Pick one with --identity <substring>, or --identity adhoc for an unsigned dev build." >&2
+    exit 1
   fi
 fi
 
