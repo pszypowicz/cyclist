@@ -72,6 +72,10 @@ brew install --cask pszypowicz/tap/cyclist
 
 Release builds are signed with a Developer ID certificate and notarized, so Gatekeeper accepts them as-is; the cask launches the app after install.
 
+### Direct download
+
+Grab `Cyclist.dmg` from the [latest release](https://github.com/pszypowicz/cyclist/releases/latest), open it, and drag Cyclist into Applications.
+
 ### Build from source
 
 ```sh
