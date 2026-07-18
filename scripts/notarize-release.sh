@@ -66,3 +66,7 @@ ditto -c -k --keepParent "$app" "$zip"
 spctl -a -vv "$app"
 echo "Release asset: $zip"
 shasum -a 256 "$zip"
+
+# The DMG is packaged from the stapled app and notarized in its own right.
+scripts/package-dmg.sh --app "$app" --output "$output/Cyclist.dmg" \
+  --keychain-profile "$profile"
