@@ -10,9 +10,13 @@ Usage: scripts/build-app.sh [--configuration debug|release] [--identity <substri
 Flags:
   --configuration     Swift build configuration: debug or release (default: release)
   --identity          Codesign identity, matched as a substring against
-                      'security find-identity' output (default: "Apple Development").
-                      Pass "adhoc" to ad-hoc sign; note that ad-hoc builds lose
-                      the Accessibility grant on every rebuild.
+                      'security find-identity' output (default: "Developer ID
+                      Application", the release identity - builds signed with
+                      it keep the TCC Accessibility grant across release
+                      installs). No fallback: a missing match is a hard error,
+                      never a silently different signature. Pass "adhoc" to
+                      ad-hoc sign; note that ad-hoc builds lose the
+                      Accessibility grant on every rebuild.
   --hardened-runtime  Sign with the hardened runtime and a secure timestamp,
                       as notarization requires. Needs network (timestamp
                       service) and a real identity.
@@ -25,7 +29,7 @@ EOF
 }
 
 configuration=release
-identity="Apple Development"
+identity="Developer ID Application"
 hardened=false
 output=build
 
@@ -62,12 +66,14 @@ cp "$bin" "$app/Contents/MacOS/Cyclist"
 if [[ "$identity" == "adhoc" ]]; then
   sign="-"
 else
-  # || true: with set -e, a failing security query (locked/absent keychain)
-  # would abort here and skip the ad-hoc fallback below.
+  # || true: with set -e, a failing security query (locked/absent
+  # keychain) would abort before the explicit error below.
   sign="$(security find-identity -v -p codesigning | awk -v id="$identity" '$0 ~ id {print $2; exit}' || true)"
   if [[ -z "$sign" ]]; then
-    echo "No codesigning identity matching '$identity'; falling back to ad-hoc." >&2
-    sign="-"
+    echo "error: no codesigning identity matching '$identity'" >&2
+    echo "List identities with: security find-identity -v -p codesigning" >&2
+    echo "Pick one with --identity <substring>, or --identity adhoc for an unsigned dev build." >&2
+    exit 1
   fi
 fi
 

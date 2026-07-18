@@ -46,8 +46,11 @@ app="$output/Cyclist.app"
 zip="$output/Cyclist.zip"
 
 # build-app.sh falls back to ad-hoc when the identity is missing; a release
-# must never ship that way.
-if ! codesign -dvv "$app" 2>&1 | grep -q "Authority=Developer ID Application"; then
+# must never ship that way. Captured instead of piped to grep -q: under
+# pipefail, grep's early exit SIGPIPEs codesign and fails the check on
+# the very output it matched.
+signature="$(codesign -dvv "$app" 2>&1)"
+if [[ "$signature" != *"Authority=Developer ID Application"* ]]; then
   echo "error: $app is not signed with a Developer ID Application identity" >&2
   exit 1
 fi
