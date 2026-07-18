@@ -131,12 +131,15 @@ struct SettingsView: View {
             }
             if liveOtherSpaceTitles, !screenRecordingGranted {
                 HStack(spacing: 4) {
-                    Text("Screen Recording is not granted.")
+                    // The macOS 26 pane lists only granted apps; the +
+                    // button there is how the grant happens.
+                    Text("Not granted - add Cyclist with the + button.")
                         .font(.caption)
                         .foregroundStyle(.orange)
                     Spacer()
-                    Button("Request Access") {
-                        requestScreenRecording()
+                    Button("Open Pane") {
+                        NSWorkspace.shared.open(URL(string:
+                            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
                     }
                     .controlSize(.small)
                 }
