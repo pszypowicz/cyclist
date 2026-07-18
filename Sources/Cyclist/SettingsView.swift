@@ -66,13 +66,13 @@ struct SettingsView: View {
                 generalSection
                 switchingSection
                 switcherListSection
-                navigationSection
             }
             .formStyle(.grouped)
             .frame(width: 360)
             .frame(maxHeight: .infinity)
             Form {
                 shortcutsSection
+                navigationSection
                 aerospaceSection
             }
             .formStyle(.grouped)
