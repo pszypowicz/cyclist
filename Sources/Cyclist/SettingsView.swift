@@ -123,7 +123,7 @@ struct SettingsView: View {
             Toggle(isOn: $liveOtherSpaceTitles) {
                 HStack(spacing: 4) {
                     Text("Live titles from other Spaces")
-                    InfoDot("Reads the titles of windows in other Spaces (fullscreen included) through the Screen Recording permission - titles only, never window contents. Off, those rows show the last title Cyclist saw, and Cyclist never requests the permission.")
+                    InfoDot("Reads the titles of windows in other Spaces (fullscreen included) through the Screen Recording permission - titles only, never window contents. Off, those rows show the last title Cyclist saw, and Cyclist never requests the permission. If the Screen Recording pane does not list Cyclist, add /Applications/Cyclist.app there with the + button.")
                 }
             }
             .onChange(of: liveOtherSpaceTitles) { on in
@@ -257,12 +257,11 @@ struct SettingsView: View {
 
     // The system permission prompt shows at most once per TCC state;
     // resetting this app's own ScreenCapture entry (unprivileged) re-arms
-    // it, so the request genuinely prompts again - and registers Cyclist
-    // in the pane's app list. The guard keeps the reset from ever
-    // touching a live grant; a refused reset falls back to opening the
-    // pane directly.
+    // it, so the request genuinely prompts again. The guard keeps the
+    // reset from ever touching a live grant; a refused reset falls back
+    // to opening the pane directly.
     private func requestScreenRecording() {
-        guard !CGPreflightScreenCaptureAccess() else { return }
+        guard !ScreenRecordingPermission.granted else { return }
         let reset = Process()
         reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
         reset.arguments = ["reset", "ScreenCapture",
@@ -273,7 +272,7 @@ struct SettingsView: View {
             rearmed = reset.terminationStatus == 0
         }
         if rearmed {
-            CGRequestScreenCaptureAccess()
+            ScreenRecordingPermission.request()
         } else {
             Log.write("screen recording: tccutil reset refused; opening the pane instead")
             NSWorkspace.shared.open(URL(string:

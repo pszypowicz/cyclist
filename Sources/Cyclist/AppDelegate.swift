@@ -41,11 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Gated on the feature toggle, so a user who leaves it off is
         // never asked for the permission.
         if Settings.liveOtherSpaceTitles {
-            let screenRecording = CGPreflightScreenCaptureAccess()
-            Log.write("startup: screen recording \(screenRecording ? "granted" : "not granted")")
-            if !screenRecording {
-                CGRequestScreenCaptureAccess()
-            }
+            Log.write("startup: screen recording \(ScreenRecordingPermission.granted ? "granted" : "not granted")")
+            ScreenRecordingPermission.request()
         } else {
             Log.write("startup: live titles off; screen recording not requested")
         }
