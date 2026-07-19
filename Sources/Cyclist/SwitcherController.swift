@@ -717,19 +717,27 @@ final class SwitcherController {
         if let spaceID, let windowID,
            navigator.begin(to: spaceID, onArrival: { [weak self] in
                guard let self else { return }
-               self.focusWindow(app: app, element: element, windowID: windowID)
-               // A window reached in another Space can arrive with a purged
-               // backing (blank though focused); a geometry nudge repaints it.
-               // But a window AeroSpace tiles on a desktop Space is repainted
-               // by AeroSpace's own arrival re-tile, so the nudge cures
-               // nothing there and its AXPosition writes only provoke a second
-               // visible relayout (the "double blink"). Fullscreen arrivals
-               // keep the nudge - AeroSpace does not tile them.
-               if let display = Spaces.activeDisplayInfo(),
-                  aeroSpaceRepaintsOnArrival(self.aerospace, windowID: windowID,
-                                             spaceID: spaceID, display: display) {
-                   Log.debug("nudge skipped: aerospace-tiled wid=\(windowID) space=\(spaceID)")
+               // Now on the window's native Space. If AeroSpace tracks it, let
+               // AeroSpace reveal it: switching to its workspace re-tiles
+               // (repaints) the window, so no geometry nudge - the nudge is
+               // what provoked AeroSpace's re-tile into a visible blink.
+               // failIfNoop separates a real switch from an already-shown
+               // workspace deterministically, against AeroSpace's own state
+               // rather than a stale cache: a no-op re-tiled nothing, so a
+               // purged backing survives and the nudge cures it. Untracked
+               // (pure native) windows take the native focus plus the nudge,
+               // which AeroSpace is not there to perform.
+               if self.aerospace.isActive, let ws = self.aerospace.workspace(ofWindow: windowID) {
+                   let generation = self.activationGeneration
+                   self.aerospace.switchToWorkspace(ws, failIfNoop: true) { [weak self] switched in
+                       guard let self, self.activationGeneration == generation else { return }
+                       self.aerospace.focusWindow(windowID)
+                       if !switched {
+                           AX.repaintNudge(pid: app.processIdentifier, windowID: windowID, element: element)
+                       }
+                   }
                } else {
+                   self.focusWindow(app: app, element: element, windowID: windowID)
                    AX.repaintNudge(pid: app.processIdentifier, windowID: windowID, element: element)
                }
            }) {

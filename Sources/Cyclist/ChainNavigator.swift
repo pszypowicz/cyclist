@@ -291,7 +291,6 @@ final class ChainNavigator {
     // AeroSpace's hidden-workspace windows, parked so far into the corner
     // that their centers leave the display.
     private func focusTopUserWindow() {
-        let display = Spaces.activeDisplayInfo()
         let displayBounds = Spaces.activeDisplayID().map(CGDisplayBounds)
         guard let window = CGWindows.real([.optionOnScreenOnly]).first(where: { window in
             guard NSRunningApplication(processIdentifier: window.pid)?.activationPolicy == .regular
@@ -304,17 +303,11 @@ final class ChainNavigator {
         // the navigation suppression window and would go unrecorded.
         recency.noteFocus(windowID: window.id, source: "chain")
         Spaces.makeKey(pid: window.pid, windowID: window.id)
-        // Arriving on a desktop can leave the top window's backing purged
-        // (blank screen, healthy bookkeeping); a geometry nudge repaints it -
-        // unless AeroSpace tiles this window, in which case its own arrival
-        // re-tile repaints it and the nudge would only provoke a visible
-        // relayout (the same "double blink" the switcher path avoids).
-        if let display,
-           aeroSpaceRepaintsOnArrival(aerospace, windowID: window.id,
-                                      spaceID: display.current, display: display) {
-            Log.debug("chain: nudge skipped: aerospace-tiled wid=\(window.id)")
-        } else {
-            AX.repaintNudge(pid: window.pid, windowID: window.id)
-        }
+        // This focuses the top ALREADY-DISPLAYED window, so its workspace is
+        // shown and AeroSpace re-tiles nothing on focus - a purged backing
+        // survives and the nudge cures it. A window AeroSpace would switch to
+        // never reaches here: the two-hop takes its switchToWorkspace success
+        // path and skips this fallback.
+        AX.repaintNudge(pid: window.pid, windowID: window.id)
     }
 }
