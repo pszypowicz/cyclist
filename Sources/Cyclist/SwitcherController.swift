@@ -716,10 +716,22 @@ final class SwitcherController {
         // needs the real swipe transition below.
         if let spaceID, let windowID,
            navigator.begin(to: spaceID, onArrival: { [weak self] in
-               self?.focusWindow(app: app, element: element, windowID: windowID)
+               guard let self else { return }
+               self.focusWindow(app: app, element: element, windowID: windowID)
                // A window reached in another Space can arrive with a purged
                // backing (blank though focused); a geometry nudge repaints it.
-               AX.repaintNudge(pid: app.processIdentifier, windowID: windowID, element: element)
+               // But a window AeroSpace tiles on a desktop Space is repainted
+               // by AeroSpace's own arrival re-tile, so the nudge cures
+               // nothing there and its AXPosition writes only provoke a second
+               // visible relayout (the "double blink"). Fullscreen arrivals
+               // keep the nudge - AeroSpace does not tile them.
+               if let display = Spaces.activeDisplayInfo(),
+                  aeroSpaceRepaintsOnArrival(self.aerospace, windowID: windowID,
+                                             spaceID: spaceID, display: display) {
+                   Log.debug("nudge skipped: aerospace-tiled wid=\(windowID) space=\(spaceID)")
+               } else {
+                   AX.repaintNudge(pid: app.processIdentifier, windowID: windowID, element: element)
+               }
            }) {
             Log.write("navigate: pid=\(app.processIdentifier) space=\(spaceID)")
             return
