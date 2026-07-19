@@ -84,6 +84,14 @@ final class AeroSpaceClient {
         windowWorkspace.compactMap { $0.value == name ? $0.key : nil }
     }
 
+    // Whether AeroSpace tracks this window at all (visible or hidden
+    // workspace). Main-thread read of the live cache, for commit-time
+    // decisions where the window's native-Space classification hid its
+    // AeroSpace membership.
+    func manages(windowID id: Int) -> Bool {
+        windowWorkspace[id] != nil
+    }
+
     // MARK: - lifecycle
 
     func start() {
@@ -459,4 +467,16 @@ final class AeroSpaceClient {
             Log.write("aerospace: \(what) failed (exit \(answer.exitCode)): \(answer.stderr)")
         }
     }
+}
+
+// Whether AeroSpace itself repaints a window on arrival at `spaceID`, which
+// makes Cyclist's repaint nudge redundant AND harmful: the nudge's AXPosition
+// writes trip AeroSpace's re-tile, a visible relayout (the "double blink").
+// AeroSpace repaints only what it actively tiles - a window it tracks that
+// lands on a user-desktop Space (type 0). A native-fullscreen window belongs
+// to a hollow workspace AeroSpace tracks but does NOT tile, so it keeps its
+// nudge: nothing else cures its purged backing.
+func aeroSpaceRepaintsOnArrival(_ aerospace: AeroSpaceClient, windowID: Int,
+                                spaceID: UInt64, display: Spaces.DisplayInfo) -> Bool {
+    aerospace.isActive && aerospace.manages(windowID: windowID) && display.types[spaceID] == 0
 }
