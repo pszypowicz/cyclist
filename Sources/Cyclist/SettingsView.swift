@@ -51,6 +51,7 @@ struct SettingsView: View {
     @AppStorage(Settings.aerospaceIntegrationKey) private var aerospaceIntegration = false
     @AppStorage(Settings.aerospaceFollowWorkspaceKey) private var aerospaceFollowWorkspace = true
     @AppStorage(Settings.showHollowWorkspacesKey) private var showHollowWorkspaces = false
+    @AppStorage(Settings.switcherSizeKey) private var switcherSize = SwitcherSize.medium.rawValue
     @AppStorage(Settings.switcherShortcutKey) private var switcherShortcut = "cmd+tab"
     @AppStorage(Settings.cycleWindowsShortcutKey) private var cycleWindowsShortcut = "cmd+backtick"
     @AppStorage(Settings.previousSpaceShortcutKey) private var previousSpaceShortcut = "ctrl+left"
@@ -179,6 +180,16 @@ struct SettingsView: View {
                 HStack(spacing: 4) {
                     Text("Window cycler")
                     InfoDot("Cycles the frontmost app's windows on the cycle binding (Cmd+` by default). Off returns the binding to macOS immediately.")
+                }
+            }
+            Picker(selection: $switcherSize) {
+                ForEach(SwitcherSize.allCases) { size in
+                    Text(size.label).tag(size.rawValue)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Switcher size")
+                    InfoDot("Scales the switcher overlay - its text, icons, and spacing together - to a preset. Larger reads more easily across the room or on a high-resolution display; smaller fits more windows on screen. Applies the next time the switcher opens. For system-wide magnification beyond this, macOS Zoom (System Settings > Accessibility > Zoom) enlarges any app.")
                 }
             }
         }

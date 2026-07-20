@@ -20,6 +20,7 @@ enum Settings {
     static let aerospaceIntegrationKey = "aerospaceIntegration"
     static let aerospaceFollowWorkspaceKey = "aerospaceFollowWorkspace"
     static let showHollowWorkspacesKey = "showHollowWorkspaces"
+    static let switcherSizeKey = "switcherSize"
     static let demoHudKey = "demoHud"
     static let switcherShortcutKey = "switcherShortcut"
     static let cycleWindowsShortcutKey = "cycleWindowsShortcut"
@@ -41,6 +42,7 @@ enum Settings {
             aerospaceIntegrationKey: false,
             aerospaceFollowWorkspaceKey: true,
             showHollowWorkspacesKey: false,
+            switcherSizeKey: SwitcherSize.medium.rawValue,
             demoHudKey: false,
             switcherShortcutKey: "cmd+tab",
             cycleWindowsShortcutKey: "cmd+backtick",
@@ -99,6 +101,14 @@ enum Settings {
 
     static var showHollowWorkspaces: Bool {
         UserDefaults.standard.bool(forKey: showHollowWorkspacesKey)
+    }
+
+    // Falls back to the default preset for a missing or garbage `defaults
+    // write` value rather than failing - an unreadable size is cosmetic,
+    // not the load-bearing hazard a bad shortcut string is.
+    static var switcherSize: SwitcherSize {
+        let raw = UserDefaults.standard.string(forKey: switcherSizeKey)
+        return raw.flatMap(SwitcherSize.init(rawValue:)) ?? .medium
     }
 
     static var demoHud: Bool {

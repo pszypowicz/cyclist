@@ -1,6 +1,68 @@
 import AppKit
 import SwiftUI
 
+// A preset scale for the switcher overlay. A single multiplier drives the
+// font, icons, and spacing together (see SwitcherMetrics), so the whole
+// overlay grows or shrinks as one instead of leaving text clipped inside a
+// fixed row.
+enum SwitcherSize: String, CaseIterable, Identifiable {
+    case small
+    case medium = "default"
+    case large
+    case extraLarge
+
+    var id: String { rawValue }
+
+    var scale: CGFloat {
+        switch self {
+        case .small: return 0.85
+        case .medium: return 1
+        case .large: return 1.2
+        case .extraLarge: return 1.4
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .small: return "Small"
+        case .medium: return "Default"
+        case .large: return "Large"
+        case .extraLarge: return "Extra Large"
+        }
+    }
+}
+
+// Every switcher dimension derives from one scale, so SwitcherView and the
+// panel's manual layout() cannot drift apart: change the scale and the text,
+// icons, padding, and the panel frame all move together. The base
+// (scale = 1) values reproduce the original fixed layout.
+struct SwitcherMetrics {
+    let scale: CGFloat
+
+    static var current: SwitcherMetrics {
+        SwitcherMetrics(scale: Settings.switcherSize.scale)
+    }
+
+    var iconSize: CGFloat { 18 * scale }
+    var titleFontSize: CGFloat { 13 * scale }
+    var annotationFontSize: CGFloat { 11 * scale }
+    var annotationSpacing: CGFloat { 12 * scale }
+    var rowHorizontalPadding: CGFloat { 10 * scale }
+    var rowVerticalPadding: CGFloat { 5 * scale }
+    var rowCornerRadius: CGFloat { 6 * scale }
+    var rowSpacing: CGFloat { 2 * scale }
+    var contentPadding: CGFloat { 8 * scale }
+    var panelCornerRadius: CGFloat { 12 * scale }
+    var width: CGFloat { 520 * scale }
+    var maxHeight: CGFloat { 560 * scale }
+
+    // The height the panel reserves per row: the icon (taller than the
+    // title's line box) plus the row's vertical padding. This is the value
+    // the manual layout must keep in step with the SwitcherView row -
+    // undercount it and the content overflows the window as the list grows.
+    var rowHeight: CGFloat { iconSize + rowVerticalPadding * 2 }
+}
+
 struct SwitcherRow {
     let icon: NSImage?
     let title: String
@@ -15,45 +77,48 @@ final class SwitcherViewModel: ObservableObject {
 
 struct SwitcherView: View {
     @ObservedObject var model: SwitcherViewModel
+    let metrics: SwitcherMetrics
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                     ForEach(Array(model.rows.enumerated()), id: \.offset) { index, row in
                         HStack {
                             if let icon = row.icon {
                                 Image(nsImage: icon)
                                     .resizable()
-                                    .frame(width: 18, height: 18)
+                                    .frame(width: metrics.iconSize, height: metrics.iconSize)
                             }
-                            (Text(row.title).fontWeight(.semibold)
-                                + Text(row.subtitle.map { " - \($0)" } ?? ""))
+                            (Text(row.title)
+                                .font(.system(size: metrics.titleFontSize, weight: .semibold))
+                                + Text(row.subtitle.map { " - \($0)" } ?? "")
+                                .font(.system(size: metrics.titleFontSize)))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
-                            Spacer(minLength: 12)
+                            Spacer(minLength: metrics.annotationSpacing)
                             if let annotation = row.annotation {
                                 Text(annotation)
-                                    .font(.system(size: 11))
+                                    .font(.system(size: metrics.annotationFontSize))
                                     .foregroundColor(index == model.selected ? .white.opacity(0.8) : .secondary)
                             }
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
+                        .padding(.horizontal, metrics.rowHorizontalPadding)
+                        .padding(.vertical, metrics.rowVerticalPadding)
                         .background(index == model.selected ? Color.accentColor : Color.clear)
                         .foregroundColor(index == model.selected ? .white : .primary)
-                        .cornerRadius(6)
+                        .cornerRadius(metrics.rowCornerRadius)
                         .id(index)
                     }
                 }
-                .padding(8)
+                .padding(metrics.contentPadding)
             }
             .onChange(of: model.selected) { newValue in
                 proxy.scrollTo(newValue)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .cornerRadius(12)
+        .cornerRadius(metrics.panelCornerRadius)
     }
 }
 
@@ -64,18 +129,15 @@ final class SwitcherPanel {
     private let model = SwitcherViewModel()
     private var lastOrderedFront = Date.distantPast
 
-    // Must mirror the SwitcherView layout: row content plus its vertical
-    // padding, the VStack spacing between rows, and the VStack padding.
-    // Undercounting any of them makes the content overflow the window, so
-    // the bottom inset visually vanishes as the list grows.
-    private let rowHeight: CGFloat = 28
-    private let rowSpacing: CGFloat = 2
-    private let contentPadding: CGFloat = 8
-    private let width: CGFloat = 520
-    private let maxHeight: CGFloat = 560
+    // The active size preset. SwitcherMetrics derives every dimension the
+    // manual layout() below shares with SwitcherView from one scale, so the
+    // two cannot drift and overflow the window. Refreshed at each show() (a
+    // session boundary); a mid-session rebuild reuses the live metrics so
+    // the panel never resizes underfoot.
+    private var metrics = SwitcherMetrics.current
 
     init() {
-        panel = Self.makePanel(model: model)
+        panel = Self.makePanel(model: model, metrics: metrics)
         // After a display disconnect the long-lived panel stays ordered in
         // and correctly framed but the WindowServer stops compositing it
         // (onscreen=false) - the switcher silently vanishes. Rebuild the
@@ -95,7 +157,7 @@ final class SwitcherPanel {
             // closed is off); without it the panel and its live SwiftUI
             // tree survive every topology change and keep rendering.
             self.panel.close()
-            self.panel = Self.makePanel(model: self.model)
+            self.panel = Self.makePanel(model: self.model, metrics: self.metrics)
             if wasVisible {
                 self.layout()
                 self.panel.orderFrontRegardless()
@@ -104,7 +166,7 @@ final class SwitcherPanel {
         }
     }
 
-    private static func makePanel(model: SwitcherViewModel) -> NSPanel {
+    private static func makePanel(model: SwitcherViewModel, metrics: SwitcherMetrics) -> NSPanel {
         let panel = NSPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -122,7 +184,7 @@ final class SwitcherPanel {
         panel.isFloatingPanel = true
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.contentView = NSHostingView(rootView: SwitcherView(model: model))
+        panel.contentView = NSHostingView(rootView: SwitcherView(model: model, metrics: metrics))
         return panel
     }
 
@@ -168,7 +230,8 @@ final class SwitcherPanel {
         let old = panel
         old.orderOut(nil)
         old.close()
-        panel = Self.makePanel(model: model)
+        metrics = SwitcherMetrics.current
+        panel = Self.makePanel(model: model, metrics: metrics)
         layout()
         panel.orderFrontRegardless()
         lastOrderedFront = Date()
@@ -189,12 +252,15 @@ final class SwitcherPanel {
     }
 
     private func layout() {
-        let rows = CGFloat(model.rows.count)
-        let content = rows * rowHeight + max(0, rows - 1) * rowSpacing + contentPadding * 2
-        let height = min(content, maxHeight)
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let frame = screen.visibleFrame
-        let origin = NSPoint(x: frame.midX - width / 2, y: frame.midY - height / 2)
-        panel.setFrame(NSRect(origin: origin, size: NSSize(width: width, height: height)), display: true)
+        let rows = CGFloat(model.rows.count)
+        let content = rows * metrics.rowHeight + max(0, rows - 1) * metrics.rowSpacing
+            + metrics.contentPadding * 2
+        // A tall list scrolls inside the panel; never let the largest preset
+        // grow the window past the screen it is centered on.
+        let height = min(content, metrics.maxHeight, frame.height - 48)
+        let origin = NSPoint(x: frame.midX - metrics.width / 2, y: frame.midY - height / 2)
+        panel.setFrame(NSRect(origin: origin, size: NSSize(width: metrics.width, height: height)), display: true)
     }
 }

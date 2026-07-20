@@ -114,11 +114,14 @@ defaults write cz.szypowi.cyclist switcherShortcut "alt+tab"
 | `showMenuBarIcon`         | bool   | `true`         |
 | `aerospaceIntegration`    | bool   | `false`        |
 | `showHollowWorkspaces`    | bool   | `false`        |
+| `switcherSize`            | string | `default`      |
 | `demoHud`                 | bool   | `false`        |
 | `switcherShortcut`        | string | `cmd+tab`      |
 | `cycleWindowsShortcut`    | string | `cmd+backtick` |
 | `previousSpaceShortcut`   | string | `ctrl+left`    |
 | `nextSpaceShortcut`       | string | `ctrl+right`   |
+
+`switcherSize` scales the switcher overlay - its text, icons, and spacing together - as one preset: `small`, `default`, `large`, or `extraLarge`. Larger reads more easily on a big or high-resolution display; smaller fits more windows on screen. A new value takes effect the next time the switcher opens. For system-wide magnification beyond this, macOS Zoom (System Settings > Accessibility > Zoom) enlarges any app.
 
 `demoHud` is for screen recordings: every hotkey press and trackpad swipe Cyclist acts on flashes briefly at the bottom of the screen (`⌃→`, `Swipe →`), and chain navigation adds the transition it performs as a second line (`workspace 2 → Safari (fullscreen)`). Keystroke visualizers cannot show these inputs - Cyclist consumes them before other apps see them.
 
