@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/icon.png" width="128" alt="Cyclist app icon">
-</p>
-
 # Cyclist
 
 A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots - just a list of app icons, names, and window titles you cycle through with Cmd+Tab.
