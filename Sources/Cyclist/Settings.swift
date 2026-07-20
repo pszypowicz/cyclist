@@ -8,11 +8,11 @@ import Foundation
 // own).
 enum Settings {
     static let appSwitcherKey = "appSwitcher"
-    static let windowCyclerKey = "windowCycler"
-    static let includeHiddenKey = "includeHidden"
-    static let includeMinimizedKey = "includeMinimized"
-    static let includeOtherSpacesKey = "includeOtherSpaces"
-    static let includeNoWindowsKey = "includeNoWindows"
+    static let windowSwitcherKey = "windowSwitcher"
+    static let showHiddenAppsKey = "showHiddenApps"
+    static let showMinimizedWindowsKey = "showMinimizedWindows"
+    static let showWindowsInOtherSpacesKey = "showWindowsInOtherSpaces"
+    static let showAppsWithNoWindowKey = "showAppsWithNoWindow"
     static let liveOtherSpaceTitlesKey = "liveOtherSpaceTitles"
     static let trackpadSwipeKey = "trackpadSwipe"
     static let keyboardSpaceNavKey = "keyboardSpaceNavigation"
@@ -22,19 +22,19 @@ enum Settings {
     static let showHollowWorkspacesKey = "showHollowWorkspaces"
     static let switcherSizeKey = "switcherSize"
     static let demoHudKey = "demoHud"
-    static let switcherShortcutKey = "switcherShortcut"
-    static let cycleWindowsShortcutKey = "cycleWindowsShortcut"
+    static let switchAppsShortcutKey = "switchAppsShortcut"
+    static let switchWindowsShortcutKey = "switchWindowsShortcut"
     static let previousSpaceShortcutKey = "previousSpaceShortcut"
     static let nextSpaceShortcutKey = "nextSpaceShortcut"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
             appSwitcherKey: true,
-            windowCyclerKey: true,
-            includeHiddenKey: true,
-            includeMinimizedKey: true,
-            includeOtherSpacesKey: true,
-            includeNoWindowsKey: false,
+            windowSwitcherKey: true,
+            showHiddenAppsKey: true,
+            showMinimizedWindowsKey: true,
+            showWindowsInOtherSpacesKey: true,
+            showAppsWithNoWindowKey: false,
             liveOtherSpaceTitlesKey: false,
             trackpadSwipeKey: true,
             keyboardSpaceNavKey: true,
@@ -44,8 +44,8 @@ enum Settings {
             showHollowWorkspacesKey: false,
             switcherSizeKey: SwitcherSize.medium.rawValue,
             demoHudKey: false,
-            switcherShortcutKey: "cmd+tab",
-            cycleWindowsShortcutKey: "cmd+backtick",
+            switchAppsShortcutKey: "cmd+tab",
+            switchWindowsShortcutKey: "cmd+backtick",
             previousSpaceShortcutKey: "ctrl+left",
             nextSpaceShortcutKey: "ctrl+right",
         ])
@@ -55,24 +55,24 @@ enum Settings {
         UserDefaults.standard.bool(forKey: appSwitcherKey)
     }
 
-    static var windowCycler: Bool {
-        UserDefaults.standard.bool(forKey: windowCyclerKey)
+    static var windowSwitcher: Bool {
+        UserDefaults.standard.bool(forKey: windowSwitcherKey)
     }
 
-    static var includeHidden: Bool {
-        UserDefaults.standard.bool(forKey: includeHiddenKey)
+    static var showHiddenApps: Bool {
+        UserDefaults.standard.bool(forKey: showHiddenAppsKey)
     }
 
-    static var includeMinimized: Bool {
-        UserDefaults.standard.bool(forKey: includeMinimizedKey)
+    static var showMinimizedWindows: Bool {
+        UserDefaults.standard.bool(forKey: showMinimizedWindowsKey)
     }
 
-    static var includeOtherSpaces: Bool {
-        UserDefaults.standard.bool(forKey: includeOtherSpacesKey)
+    static var showWindowsInOtherSpaces: Bool {
+        UserDefaults.standard.bool(forKey: showWindowsInOtherSpacesKey)
     }
 
-    static var includeNoWindows: Bool {
-        UserDefaults.standard.bool(forKey: includeNoWindowsKey)
+    static var showAppsWithNoWindow: Bool {
+        UserDefaults.standard.bool(forKey: showAppsWithNoWindowKey)
     }
 
     static var liveOtherSpaceTitles: Bool {
@@ -127,29 +127,29 @@ enum Settings {
 final class ShortcutSettings: NSObject {
     static let shared = ShortcutSettings()
 
-    private(set) var switcher: Shortcut
-    private(set) var cycleWindows: Shortcut
+    private(set) var switchApps: Shortcut
+    private(set) var switchWindows: Shortcut
     private(set) var previousSpace: Shortcut
     private(set) var nextSpace: Shortcut
 
     // Keyed by defaults key - what the recorder's duplicate check walks.
     var all: [String: Shortcut] {
         [
-            Settings.switcherShortcutKey: switcher,
-            Settings.cycleWindowsShortcutKey: cycleWindows,
+            Settings.switchAppsShortcutKey: switchApps,
+            Settings.switchWindowsShortcutKey: switchWindows,
             Settings.previousSpaceShortcutKey: previousSpace,
             Settings.nextSpaceShortcutKey: nextSpace,
         ]
     }
 
     private static let keys = [
-        Settings.switcherShortcutKey, Settings.cycleWindowsShortcutKey,
+        Settings.switchAppsShortcutKey, Settings.switchWindowsShortcutKey,
         Settings.previousSpaceShortcutKey, Settings.nextSpaceShortcutKey,
     ]
 
     override private init() {
-        switcher = Self.read(Settings.switcherShortcutKey)
-        cycleWindows = Self.read(Settings.cycleWindowsShortcutKey)
+        switchApps = Self.read(Settings.switchAppsShortcutKey)
+        switchWindows = Self.read(Settings.switchWindowsShortcutKey)
         previousSpace = Self.read(Settings.previousSpaceShortcutKey)
         nextSpace = Self.read(Settings.nextSpaceShortcutKey)
         super.init()
@@ -161,8 +161,8 @@ final class ShortcutSettings: NSObject {
     override func observeValue(forKeyPath keyPath: String?, of object: Any?,
                                change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
         DispatchQueue.main.async { [self] in
-            switcher = Self.read(Settings.switcherShortcutKey)
-            cycleWindows = Self.read(Settings.cycleWindowsShortcutKey)
+            switchApps = Self.read(Settings.switchAppsShortcutKey)
+            switchWindows = Self.read(Settings.switchWindowsShortcutKey)
             previousSpace = Self.read(Settings.previousSpaceShortcutKey)
             nextSpace = Self.read(Settings.nextSpaceShortcutKey)
         }
