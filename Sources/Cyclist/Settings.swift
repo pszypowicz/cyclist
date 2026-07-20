@@ -18,6 +18,7 @@ enum Settings {
     static let keyboardSpaceNavKey = "keyboardSpaceNavigation"
     static let showMenuBarIconKey = "showMenuBarIcon"
     static let aerospaceIntegrationKey = "aerospaceIntegration"
+    static let aerospaceFollowWorkspaceKey = "aerospaceFollowWorkspace"
     static let showHollowWorkspacesKey = "showHollowWorkspaces"
     static let demoHudKey = "demoHud"
     static let switcherShortcutKey = "switcherShortcut"
@@ -38,6 +39,7 @@ enum Settings {
             keyboardSpaceNavKey: true,
             showMenuBarIconKey: true,
             aerospaceIntegrationKey: false,
+            aerospaceFollowWorkspaceKey: true,
             showHollowWorkspacesKey: false,
             demoHudKey: false,
             switcherShortcutKey: "cmd+tab",
@@ -89,6 +91,10 @@ enum Settings {
 
     static var aerospaceIntegration: Bool {
         UserDefaults.standard.bool(forKey: aerospaceIntegrationKey)
+    }
+
+    static var aerospaceFollowWorkspace: Bool {
+        UserDefaults.standard.bool(forKey: aerospaceFollowWorkspaceKey)
     }
 
     static var showHollowWorkspaces: Bool {

@@ -67,6 +67,14 @@ final class SwitcherController {
         self.recency = recency
         self.aerospace = aerospace
         self.navigator = SpaceNavigator(events: events, recency: recency)
+        // Complement mode: when AeroSpace switches workspace on its own - the
+        // user's binding, which it honors even from another native Space -
+        // follow to where that workspace shows. Read per event so the toggle
+        // applies live; delivered on the AeroSpace event callback (main queue).
+        aerospace.onExternalWorkspaceChange = { [weak self] workspace in
+            guard Settings.aerospaceFollowWorkspace else { return }
+            self?.chain.followWorkspaceChange(to: workspace)
+        }
         tap.onKeyDown = { [weak self] event in
             self?.handleKeyDown(event) ?? false
         }

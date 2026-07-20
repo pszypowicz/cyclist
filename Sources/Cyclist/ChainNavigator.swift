@@ -147,6 +147,50 @@ final class ChainNavigator {
         return hudDetail
     }
 
+    // Complement to AeroSpace's own workspace bindings: AeroSpace honors
+    // ⌥N (or whatever the user bound) even from another native Space, but it
+    // switches the workspace invisibly - macOS never moves the user to where
+    // it shows. This reacts to that external switch and crosses to the
+    // workspace's native home so the binding actually takes you there:
+    //   - any window tiled on the host desktop (a normal workspace, or one
+    //     only partly fullscreen) -> hop to the desktop, focus its top window.
+    //   - every window native-fullscreen (hollow) -> hop to the fullscreen
+    //     Space showing one of them; the desktop would be bare, and
+    //     AeroSpace's own focus does not move macOS there.
+    // No-ops when already positioned, when the client is inactive, or when
+    // the host desktop cannot be resolved (several regular desktops seen from
+    // off-host - AeroSpace does not say which one it occupies). Runs on the
+    // AeroSpace event callback (main queue), never the key tap.
+    func followWorkspaceChange(to name: String) {
+        guard aerospace.isActive, let display = Spaces.activeDisplayInfo() else { return }
+        guard let host = chooseHost(display) else {
+            Log.write("chain: follow \(name); no host desktop")
+            return
+        }
+        let windows = Set(aerospace.windowIDs(inWorkspace: name))
+        // The workspace shows on the host desktop as long as any of its
+        // windows lives there - parked windows count, they sit off-screen on
+        // the same native Space. Only when every window is native-fullscreen
+        // does it show on a fullscreen Space instead, so route there.
+        var target = host
+        if !windows.isEmpty, Spaces.windowIDs(inSpace: host).isDisjoint(with: windows) {
+            if let fullscreenHome = display.order.first(where: { id in
+                display.types[id] != 0 && !Spaces.windowIDs(inSpace: id).isDisjoint(with: windows)
+            }) {
+                target = fullscreenHome
+            } else {
+                Log.write("chain: follow \(name); hollow but no fullscreen home, using host")
+            }
+        }
+        guard display.current != target else { return }
+        Log.write("chain: follow \(name) -> space \(target)")
+        // Focus the top window only when landing on a user desktop; a
+        // fullscreen Space already shows its single window.
+        let arrival: (() -> Void)? = display.types[target] == 0
+            ? { [weak self] in self?.focusTopUserWindow() } : nil
+        _ = navigator.begin(to: target, onArrival: arrival)
+    }
+
     // Demo-HUD label for a ring stop, in Mission Control's nomenclature:
     // AeroSpace workspaces by name, user desktops as "desktop", and a
     // fullscreen Space by the app it shows (any real window's owner - a

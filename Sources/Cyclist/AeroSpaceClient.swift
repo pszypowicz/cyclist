@@ -49,6 +49,17 @@ final class AeroSpaceClient {
     private var generation = 0
     private var loggedServer = false
 
+    // Fires when AeroSpace's focused workspace changes for a reason Cyclist
+    // did not initiate - the user's own workspace binding, which AeroSpace
+    // honors even from another native Space but without moving the user
+    // there. The complement follow reacts by crossing to the workspace's
+    // native Space.
+    var onExternalWorkspaceChange: ((String) -> Void)?
+    // The workspace of Cyclist's most recent switch command, matched against
+    // the confirming event so a self-issued switch is not mistaken for the
+    // user's binding and followed a second time.
+    private var selfSwitch: (name: String, at: Date)?
+
     // MARK: - cache (readable any time; empty whenever not active)
 
     // Workspace names of AeroSpace's focused monitor, in AeroSpace's order,
@@ -134,6 +145,7 @@ final class AeroSpaceClient {
     // chain focus work onto the switch can tell "switched" from "nothing
     // happened, nobody got focused".
     func switchToWorkspace(_ name: String, failIfNoop: Bool = false, completion: ((Bool) -> Void)? = nil) {
+        selfSwitch = (name, Date())
         var args = ["workspace", name]
         if failIfNoop {
             args.append("--fail-if-noop")
@@ -152,6 +164,18 @@ final class AeroSpaceClient {
     func focusWindow(_ windowID: Int, completion: ((Bool) -> Void)? = nil) {
         runCommand(["focus", "--window-id", String(windowID)], what: "focus \(windowID)",
                    completion: completion)
+    }
+
+    // True when this workspace matches Cyclist's own recent switch, so the
+    // confirming event is not taken for the user's binding. The grace window
+    // is generous against event lag; a genuine user switch to the same
+    // workspace inside it is indistinguishable and simply goes unfollowed -
+    // harmless, since it lands where Cyclist just put them.
+    private func consumeSelfSwitch(_ workspace: String) -> Bool {
+        guard let selfSwitch, selfSwitch.name == workspace,
+              Date().timeIntervalSince(selfSwitch.at) < 2 else { return false }
+        self.selfSwitch = nil
+        return true
     }
 
     private func runCommand(_ args: [String],
@@ -346,7 +370,18 @@ final class AeroSpaceClient {
             if Date().timeIntervalSince(lastRefresh) > 5 {
                 refresh()
             }
-        case "focused-workspace-changed", "focused-monitor-changed":
+        case "focused-workspace-changed":
+            if state == .active, let workspace = event["workspace"] as? String {
+                focusedWorkspace = workspace
+                // A switch Cyclist did not issue is the user's own binding
+                // firing (possibly from another native Space); the follow
+                // brings them to where the workspace shows.
+                if !consumeSelfSwitch(workspace) {
+                    onExternalWorkspaceChange?(workspace)
+                }
+            }
+            refresh()
+        case "focused-monitor-changed":
             if state == .active, let workspace = event["workspace"] as? String {
                 focusedWorkspace = workspace
             }

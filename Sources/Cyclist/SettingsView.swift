@@ -49,6 +49,7 @@ struct SettingsView: View {
     @AppStorage(Settings.keyboardSpaceNavKey) private var keyboardSpaceNav = true
     @AppStorage(Settings.showMenuBarIconKey) private var showMenuBarIcon = true
     @AppStorage(Settings.aerospaceIntegrationKey) private var aerospaceIntegration = false
+    @AppStorage(Settings.aerospaceFollowWorkspaceKey) private var aerospaceFollowWorkspace = true
     @AppStorage(Settings.showHollowWorkspacesKey) private var showHollowWorkspaces = false
     @AppStorage(Settings.switcherShortcutKey) private var switcherShortcut = "cmd+tab"
     @AppStorage(Settings.cycleWindowsShortcutKey) private var cycleWindowsShortcut = "cmd+backtick"
@@ -243,6 +244,13 @@ struct SettingsView: View {
                     InfoDot("Bridges to the AeroSpace tiling window manager over its socket: its workspaces join Ctrl+Left/Right navigation and windows parked in hidden workspaces get switcher rows. Requires AeroSpace running.")
                 }
             }
+            Toggle(isOn: $aerospaceFollowWorkspace) {
+                HStack(spacing: 4) {
+                    Text("Follow workspace switches")
+                    InfoDot("When your AeroSpace workspace shortcut (e.g. Option+1-9, defined in the AeroSpace config) switches to a workspace whose windows are on the main desktop, Cyclist follows you to that desktop - so the shortcut works even from a fullscreen Space. AeroSpace still makes the switch; Cyclist only brings you to the right native Space.")
+                }
+            }
+            .disabled(!aerospaceIntegration)
             Toggle(isOn: $showHollowWorkspaces) {
                 HStack(spacing: 4) {
                     Text("Show hollow workspaces")
