@@ -60,6 +60,12 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 mkdir -p "$app/Contents/Resources"
 cp Resources/Info.plist "$app/Contents/Info.plist"
+# Stamp the bundle version from VERSION, the single source of truth. The
+# plist ships with a __VERSION__ placeholder so no build carries a stale
+# hardcoded number; the BuildMetadata plugin reads the same file.
+version=$(head -1 VERSION 2>/dev/null | tr -d '[:space:]')
+[ -n "$version" ] || { echo "error: VERSION file missing or empty" >&2; exit 1; }
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app/Contents/Info.plist"
 cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 cp "$bin" "$app/Contents/MacOS/Cyclist"
 
