@@ -1,0 +1,177 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 540" role="img"
+     font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>Cyclist: hold Cmd, cycle the text list to a window that lives in a fullscreen Space, release, and the display jumps straight there.</title>
+  <desc>An animated schematic of the Cyclist switcher. A Ghostty terminal fills the current desktop. Holding Cmd opens a vertical text list of windows; each window is its own row, some tagged "other space" or "minimized". The selection moves down to a Safari window that lives in a fullscreen Space (tagged "other space"), and on release the whole screen jumps straight to that Space.</desc>
+
+  <defs>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dce9f8"/>
+      <stop offset="1" stop-color="#acc8ea"/>
+    </linearGradient>
+    <clipPath id="screen">
+      <rect x="30" y="20" width="840" height="470" rx="18"/>
+    </clipPath>
+
+    <g id="ic-term" fill="none" stroke="#57606a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="-9" y="-7" width="18" height="14" rx="2.5"/>
+      <path d="M-5 -2 L-2 1 L-5 4"/><path d="M0.5 4 H4.5"/>
+    </g>
+    <g id="ic-mail" fill="none" stroke="#57606a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="-9" y="-6.5" width="18" height="13" rx="2.5"/>
+      <path d="M-8.5 -5 L0 2 L8.5 -5"/>
+    </g>
+    <g id="ic-finder" fill="none" stroke="#57606a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-9 -4 h5.5 l2 2.2 H9 v8.2 a1.4 1.4 0 0 1 -1.4 1.4 H-7.6 A1.4 1.4 0 0 1 -9 6.4 Z"/>
+    </g>
+    <g id="ic-safari">
+      <circle r="8.6" fill="none" stroke="#57606a" stroke-width="1.6"/>
+      <path d="M0 0 L4.4 -4.4 L1.1 -1.1 Z" fill="#f85149"/>
+      <path d="M0 0 L-4.4 4.4 L-1.1 1.1 Z" fill="#57606a"/>
+    </g>
+    <g id="ic-notes" fill="none" stroke="#57606a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="-7" y="-8" width="14" height="16" rx="2.4"/>
+      <path d="M-4 -3.5 H4 M-4 0.5 H4 M-4 4.5 H1.5"/>
+    </g>
+  </defs>
+
+  <rect width="900" height="540" fill="#e9ebee"/>
+
+  <!-- ============ THE DISPLAY ============ -->
+  <g clip-path="url(#screen)">
+
+    <!-- current Space: a Ghostty terminal on the desktop -->
+    <g>
+      <animate attributeName="opacity" dur="9s" repeatCount="indefinite"
+               values="1;1;0;0;1;1" keyTimes="0;0.565;0.585;0.895;0.915;1"/>
+      <rect x="30" y="20" width="840" height="470" fill="url(#wall)"/>
+
+      <!-- menu bar (hidden with the desktop, so fullscreen reads as fullscreen) -->
+      <rect x="30" y="20" width="840" height="26" fill="#f6f6f8" fill-opacity="0.9"/>
+      <text x="48" y="37" font-size="12.5" font-weight="700" fill="#1d1d1f">Ghostty</text>
+      <text x="120" y="37" font-size="12.5" fill="#6e6e73">File  Edit  View  Window</text>
+      <text x="822" y="37" font-size="12.5" fill="#3c3c43" text-anchor="end">9:41</text>
+
+      <!-- terminal window (~78% of the display): traffic lights + title
+           bar mark it as a windowed app; the fullscreen Space it jumps to
+           has neither -->
+      <rect x="120" y="96" width="660" height="356" rx="13" fill="#fbfaf7" stroke="#d0d7de"/>
+      <circle cx="146" cy="122" r="6.5" fill="#ff5f57"/>
+      <circle cx="168" cy="122" r="6.5" fill="#febc2e"/>
+      <circle cx="190" cy="122" r="6.5" fill="#28c840"/>
+      <text x="450" y="126" font-size="12.5" fill="#57606a" text-anchor="middle">cyclist - zsh</text>
+      <line x1="120" y1="146" x2="780" y2="146" stroke="#1f2328" stroke-opacity="0.10"/>
+      <g font-family="ui-monospace, Menlo, monospace" font-size="14.5" xml:space="preserve">
+        <text x="146" y="184"><tspan fill="#1a7f37">➜</tspan><tspan fill="#0f7a86">  cyclist</tspan><tspan fill="#1f2328">  git status</tspan></text>
+        <text x="146" y="212" fill="#57606a">On branch main</text>
+        <text x="146" y="240" fill="#57606a">Your branch is up to date with 'origin/main'.</text>
+        <text x="146" y="268" fill="#57606a">nothing to commit, working tree clean</text>
+        <text x="146" y="302"><tspan fill="#1a7f37">➜</tspan><tspan fill="#0f7a86">  cyclist</tspan><tspan fill="#1f2328">  swift build</tspan></text>
+        <text x="146" y="330" fill="#1a7f37">Build complete! (1.6s)</text>
+        <text x="146" y="364"><tspan fill="#1a7f37">➜</tspan><tspan fill="#0f7a86">  cyclist</tspan><tspan fill="#1f2328">  open build/Cyclist.app</tspan></text>
+        <text x="146" y="396"><tspan fill="#1a7f37">➜</tspan><tspan fill="#0f7a86">  cyclist</tspan><tspan fill="#1f2328">  </tspan><tspan fill="#1f2328">▎</tspan></text>
+      </g>
+    </g>
+
+    <!-- destination Space: Safari, fullscreen -->
+    <g opacity="0">
+      <animate attributeName="opacity" dur="9s" repeatCount="indefinite"
+               values="0;0;1;1;0;0" keyTimes="0;0.575;0.595;0.885;0.905;1"/>
+      <rect x="30" y="20" width="840" height="470" fill="#ffffff"/>
+      <!-- browser toolbar -->
+      <rect x="30" y="20" width="840" height="52" fill="#f6f6f8"/>
+      <circle cx="70" cy="46" r="9" fill="none" stroke="#6e6e73" stroke-width="1.6"/>
+      <path d="M66 46 H74 M70 42 V50" stroke="#6e6e73" stroke-width="1.6" stroke-linecap="round"/>
+      <rect x="330" y="33" width="240" height="26" rx="13" fill="#ececf0"/>
+      <path d="M446 42 v-3 a4 4 0 0 1 8 0 v3 M444 42 h12 v8 h-12 z" fill="none" stroke="#57606a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="462" y="50" font-size="12.5" fill="#1f2328">Start Page</text>
+      <!-- start page -->
+      <text x="90" y="118" font-size="13" letter-spacing="1.5" fill="#6e6e73">FAVORITES</text>
+      <g>
+        <g transform="translate(90,134)">
+          <rect width="150" height="120" rx="16" fill="#ffffff" stroke="#e2e2e7"/>
+          <circle cx="75" cy="48" r="20" fill="#3fb950" fill-opacity="0.9"/>
+          <text x="75" y="94" font-size="13" fill="#1f2328" text-anchor="middle">GitHub</text>
+        </g>
+        <g transform="translate(262,134)">
+          <rect width="150" height="120" rx="16" fill="#ffffff" stroke="#e2e2e7"/>
+          <circle cx="75" cy="48" r="20" fill="#58a6ff" fill-opacity="0.9"/>
+          <text x="75" y="94" font-size="13" fill="#1f2328" text-anchor="middle">Docs</text>
+        </g>
+        <g transform="translate(434,134)">
+          <rect width="150" height="120" rx="16" fill="#ffffff" stroke="#e2e2e7"/>
+          <circle cx="75" cy="48" r="20" fill="#f0883e" fill-opacity="0.9"/>
+          <text x="75" y="94" font-size="13" fill="#1f2328" text-anchor="middle">Mail</text>
+        </g>
+        <g transform="translate(606,134)">
+          <rect width="150" height="120" rx="16" fill="#ffffff" stroke="#e2e2e7"/>
+          <circle cx="75" cy="48" r="20" fill="#f85149" fill-opacity="0.9"/>
+          <text x="75" y="94" font-size="13" fill="#1f2328" text-anchor="middle">Calendar</text>
+        </g>
+      </g>
+      <text x="90" y="316" font-size="13" letter-spacing="1.5" fill="#6e6e73">PRIVACY REPORT</text>
+      <rect x="90" y="332" width="666" height="120" rx="16" fill="#ffffff" stroke="#e2e2e7"/>
+      <text x="114" y="378" font-size="15" fill="#1f2328">In the last seven days, Safari blocked 142 trackers.</text>
+      <text x="114" y="406" font-size="13" fill="#6e6e73">18 websites contacted them. Tap to see details.</text>
+    </g>
+
+  </g>
+  <!-- crisp display border on top of the clipped content -->
+  <rect x="30" y="20" width="840" height="470" rx="18" fill="none" stroke="#d0d7de" stroke-width="1.5"/>
+
+  <!-- ============ THE CYCLIST PANEL (floats over the screen) ============ -->
+  <g opacity="0">
+    <animate attributeName="opacity" dur="9s" repeatCount="indefinite"
+             values="0;0;1;1;0;0" keyTimes="0;0.06;0.10;0.55;0.585;1"/>
+    <rect x="224" y="156" width="460" height="244" rx="14" fill="#000000" fill-opacity="0.18"/>
+    <rect x="220" y="150" width="460" height="244" rx="13" fill="#f6f6f8" stroke="#e2e2e7"/>
+
+    <!-- moving selection highlight -->
+    <rect x="228" y="208" width="444" height="40" rx="8" fill="#0a84ff">
+      <animate attributeName="y" dur="9s" repeatCount="indefinite" calcMode="discrete"
+               values="208;252;296" keyTimes="0;0.30;0.42"/>
+    </rect>
+
+    <!-- rows -->
+    <use href="#ic-term" transform="translate(250,184)"/>
+    <text x="274" y="189" font-size="15" font-weight="500" fill="#1f2328">Ghostty</text>
+
+    <use href="#ic-mail" transform="translate(250,228)"/>
+    <text x="274" y="233" font-size="15" font-weight="500" fill="#1f2328">Mail - Inbox
+      <animate attributeName="fill" dur="9s" repeatCount="indefinite"
+               values="#1f2328;#1f2328;#ffffff;#ffffff;#1f2328;#1f2328" keyTimes="0;0.09;0.11;0.29;0.31;1"/></text>
+
+    <use href="#ic-finder" transform="translate(250,272)"/>
+    <text x="274" y="277" font-size="15" font-weight="500" fill="#1f2328">Finder
+      <animate attributeName="fill" dur="9s" repeatCount="indefinite"
+               values="#1f2328;#1f2328;#ffffff;#ffffff;#1f2328;#1f2328" keyTimes="0;0.29;0.31;0.41;0.43;1"/></text>
+    <text x="664" y="277" font-size="11.5" text-anchor="end" fill="#6e6e73">other space
+      <animate attributeName="fill" dur="9s" repeatCount="indefinite"
+               values="#6e6e73;#6e6e73;#ffffff;#ffffff;#6e6e73;#6e6e73" keyTimes="0;0.29;0.31;0.41;0.43;1"/></text>
+
+    <use href="#ic-safari" transform="translate(250,316)"/>
+    <text x="274" y="321" font-size="15" font-weight="500" fill="#1f2328">Safari - Start Page
+      <animate attributeName="fill" dur="9s" repeatCount="indefinite"
+               values="#1f2328;#1f2328;#ffffff;#ffffff;#1f2328;#1f2328" keyTimes="0;0.41;0.43;0.55;0.57;1"/></text>
+    <text x="664" y="321" font-size="11.5" text-anchor="end" fill="#6e6e73">other space
+      <animate attributeName="fill" dur="9s" repeatCount="indefinite"
+               values="#6e6e73;#6e6e73;#ffffff;#ffffff;#6e6e73;#6e6e73" keyTimes="0;0.41;0.43;0.55;0.57;1"/></text>
+
+    <use href="#ic-notes" transform="translate(250,360)"/>
+    <text x="274" y="365" font-size="15" font-weight="500" fill="#1f2328">Notes</text>
+    <text x="664" y="365" font-size="11.5" text-anchor="end" fill="#6e6e73">minimized</text>
+  </g>
+
+  <!-- ============ CAPTION ============ -->
+  <g text-anchor="middle">
+    <text x="450" y="520" font-size="15" fill="#57606a" opacity="0">
+      <animate attributeName="opacity" dur="9s" repeatCount="indefinite"
+               values="0;0;1;1;0;0" keyTimes="0;0.09;0.13;0.53;0.56;1"/>
+      Hold <tspan fill="#1f2328" font-weight="600">⌘</tspan>, tap <tspan fill="#1f2328" font-weight="600">⇥</tspan> - every window is a row, wherever it lives
+    </text>
+    <text x="450" y="520" font-size="15" fill="#57606a" opacity="0">
+      <animate attributeName="opacity" dur="9s" repeatCount="indefinite"
+               values="0;0;1;1;0;0" keyTimes="0;0.60;0.64;0.86;0.90;1"/>
+      Release <tspan fill="#1f2328" font-weight="600">⌘</tspan> - the screen jumps straight to its Space
+    </text>
+  </g>
+</svg>
