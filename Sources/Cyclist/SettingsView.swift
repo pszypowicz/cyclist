@@ -39,11 +39,11 @@ private struct InfoDot: View {
 
 struct SettingsView: View {
     @AppStorage(Settings.appSwitcherKey) private var appSwitcher = true
-    @AppStorage(Settings.windowCyclerKey) private var windowCycler = true
-    @AppStorage(Settings.includeHiddenKey) private var includeHidden = true
-    @AppStorage(Settings.includeMinimizedKey) private var includeMinimized = true
-    @AppStorage(Settings.includeOtherSpacesKey) private var includeOtherSpaces = true
-    @AppStorage(Settings.includeNoWindowsKey) private var includeNoWindows = false
+    @AppStorage(Settings.windowSwitcherKey) private var windowSwitcher = true
+    @AppStorage(Settings.showHiddenAppsKey) private var showHiddenApps = true
+    @AppStorage(Settings.showMinimizedWindowsKey) private var showMinimizedWindows = true
+    @AppStorage(Settings.showWindowsInOtherSpacesKey) private var showWindowsInOtherSpaces = true
+    @AppStorage(Settings.showAppsWithNoWindowKey) private var showAppsWithNoWindow = false
     @AppStorage(Settings.liveOtherSpaceTitlesKey) private var liveOtherSpaceTitles = false
     @AppStorage(Settings.trackpadSwipeKey) private var trackpadSwipe = true
     @AppStorage(Settings.keyboardSpaceNavKey) private var keyboardSpaceNav = true
@@ -52,8 +52,8 @@ struct SettingsView: View {
     @AppStorage(Settings.aerospaceFollowWorkspaceKey) private var aerospaceFollowWorkspace = true
     @AppStorage(Settings.showHollowWorkspacesKey) private var showHollowWorkspaces = false
     @AppStorage(Settings.switcherSizeKey) private var switcherSize = SwitcherSize.medium.rawValue
-    @AppStorage(Settings.switcherShortcutKey) private var switcherShortcut = "cmd+tab"
-    @AppStorage(Settings.cycleWindowsShortcutKey) private var cycleWindowsShortcut = "cmd+backtick"
+    @AppStorage(Settings.switchAppsShortcutKey) private var switchAppsShortcut = "cmd+tab"
+    @AppStorage(Settings.switchWindowsShortcutKey) private var switchWindowsShortcut = "cmd+backtick"
     @AppStorage(Settings.previousSpaceShortcutKey) private var previousSpaceShortcut = "ctrl+left"
     @AppStorage(Settings.nextSpaceShortcutKey) private var nextSpaceShortcut = "ctrl+right"
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -68,7 +68,8 @@ struct SettingsView: View {
             Form {
                 generalSection
                 switchingSection
-                switcherListSection
+                windowFiltersSection
+                appSwitcherListSection
             }
             .formStyle(.grouped)
             .frame(width: 360)
@@ -173,13 +174,13 @@ struct SettingsView: View {
             Toggle(isOn: $appSwitcher) {
                 HStack(spacing: 4) {
                     Text("App switcher")
-                    InfoDot("Replaces the switcher binding (Cmd+Tab by default) with Cyclist's list. Off returns the binding to macOS immediately, leaving Space navigation as Cyclist's job.")
+                    InfoDot("Replaces the app-switch binding (Cmd+Tab by default) with Cyclist's list. Off returns the binding to macOS immediately, leaving Space navigation as Cyclist's job.")
                 }
             }
-            Toggle(isOn: $windowCycler) {
+            Toggle(isOn: $windowSwitcher) {
                 HStack(spacing: 4) {
-                    Text("Window cycler")
-                    InfoDot("Cycles the frontmost app's windows on the cycle binding (Cmd+` by default). Off returns the binding to macOS immediately.")
+                    Text("Window switcher")
+                    InfoDot("Switches among the frontmost app's windows on the window-switch binding (Cmd+` by default). Off returns the binding to macOS immediately.")
                 }
             }
             Picker(selection: $switcherSize) {
@@ -195,17 +196,38 @@ struct SettingsView: View {
         }
     }
 
-    private var switcherListSection: some View {
-        Section("Switcher list") {
-                Toggle("Include hidden apps", isOn: $includeHidden)
-                Toggle("Include minimized apps", isOn: $includeMinimized)
-                Toggle("Include apps in other Spaces", isOn: $includeOtherSpaces)
-                Toggle(isOn: $includeNoWindows) {
-                    HStack(spacing: 4) {
-                        Text("Include apps with no windows")
-                        InfoDot("Lists running apps that have no windows at all. Selecting one behaves like clicking its Dock icon, so the app reopens a window.")
-                    }
+    // The list filters split by scope. Minimized and other-Spaces are
+    // per-window predicates that both the app switcher and the window
+    // switcher honor, so they stay live while either feature is on; hidden
+    // and no-windows are per-app and only the app switcher reads them.
+    // Keeping them in one section would tie the window filters' disabled
+    // state to the app switcher alone, graying them out while they still
+    // shape the window switcher's list.
+    private var windowFiltersSection: some View {
+        Section {
+            Toggle("Show minimized windows", isOn: $showMinimizedWindows)
+            Toggle("Show windows in other Spaces", isOn: $showWindowsInOtherSpaces)
+        } header: {
+            Text("Windows shown")
+        } footer: {
+            Text("Applies to both the app switcher and the window switcher.")
+        }
+        .disabled(!appSwitcher && !windowSwitcher)
+    }
+
+    private var appSwitcherListSection: some View {
+        Section {
+            Toggle("Show hidden apps", isOn: $showHiddenApps)
+            Toggle(isOn: $showAppsWithNoWindow) {
+                HStack(spacing: 4) {
+                    Text("Show apps with no open window")
+                    InfoDot("Lists running apps with no open window. Selecting one behaves like clicking its Dock icon, so the app reopens a window.")
                 }
+            }
+        } header: {
+            Text("App switcher list")
+        } footer: {
+            Text("Applies to the app switcher only.")
         }
         .disabled(!appSwitcher)
     }
@@ -229,10 +251,10 @@ struct SettingsView: View {
 
     private var shortcutsSection: some View {
         Section {
-            shortcutRow(key: Settings.switcherShortcutKey, value: switcherShortcut,
-                        info: "Opens the switcher. Hold the shortcut's modifiers to keep the list open; a quick tap returns to the previous window. Shift reverses the direction.")
-            shortcutRow(key: Settings.cycleWindowsShortcutKey, value: cycleWindowsShortcut,
-                        info: "Cycles the windows of the frontmost app, including minimized ones and windows in other Spaces.")
+            shortcutRow(key: Settings.switchAppsShortcutKey, value: switchAppsShortcut,
+                        info: "Opens the app switcher. Hold the shortcut's modifiers to keep the list open; a quick tap returns to the previous window. Shift reverses the direction.")
+            shortcutRow(key: Settings.switchWindowsShortcutKey, value: switchWindowsShortcut,
+                        info: "Switches among the windows of the frontmost app, including minimized ones and windows in other Spaces.")
             shortcutRow(key: Settings.previousSpaceShortcutKey, value: previousSpaceShortcut,
                         info: "Steps to the previous Space or workspace on the active display.")
             shortcutRow(key: Settings.nextSpaceShortcutKey, value: nextSpaceShortcut,

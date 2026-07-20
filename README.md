@@ -1,6 +1,6 @@
 # Cyclist
 
-A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots - just a list of app icons, names, and window titles you cycle through with Cmd+Tab.
+A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots - just a list of app icons, names, and window titles you switch between with Cmd+Tab.
 
 > **Beta:** Cyclist is pre-1.0. Backward compatibility is not guaranteed until version 1.0.0 is reached.
 
@@ -16,15 +16,16 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
 - Replaces the native Cmd+Tab switcher with a vertical, text-only list in most-recently-used app order. Every window gets its own row (`App - Window title`), so two Safari windows are two entries, and within an app the rows are ordered by when you last used each window.
 - A quick Cmd+Tab tap returns to the previous window, wherever it lives - even between two windows of the same app, and even across Spaces or workspaces.
 - Windows in other Spaces (including native fullscreen) get their own rows too. With Screen Recording permission granted their titles are live; without it, each row shows the last title Cyclist saw while that window was visible. Selecting a row jumps straight to that Space.
-- A separate binding (Cmd+`) cycles through the windows of the frontmost app in most-recently-used order, including minimized ones and windows in other Spaces (native fullscreen included) - things the native window cycler skips. A quick tap bounces between the app's last two windows.
+- A separate binding (Cmd+`) switches among the windows of the frontmost app in most-recently-used order, including minimized ones and windows in other Spaces (native fullscreen included) - things the native window switcher skips. A quick tap bounces between the app's last two windows.
 - Ctrl+Left/Right walks the native Spaces of the active display (the one holding the menu bar) in Mission Control order - user desktops and fullscreen Spaces alike - instantly and without animation. Arriving on a desktop focuses its top window, so leaving a fullscreen app always lands somewhere concrete.
 - The trackpad's Spaces swipe (three or four fingers, per System Settings > Trackpad > More Gestures) drives that same navigation: Cyclist intercepts the gesture before the Dock sees it and steps instantly instead of playing the animated transition. The system gesture must stay **enabled** - it is what makes macOS emit the gesture events at all. A Settings toggle ("Trackpad swipe navigation") hands the gesture back to macOS at any time.
 - With [AeroSpace](https://github.com/nikitabobko/AeroSpace) running, its workspaces join that ring in place of the desktop hosting them, so Ctrl+Left/Right walks `workspace 1 ... workspace N, fullscreen Spaces` seamlessly - workspace steps go over AeroSpace's socket, and crossing from a fullscreen Space lands on the ring-adjacent workspace. Windows parked in hidden workspaces appear in the switcher as `workspace N` rows; selecting one switches there. A workspace whose windows all went native-fullscreen is hollow - its windows display on their own Spaces and visiting it shows a bare desktop - so the ring skips it by default and the fullscreen Space itself is the stop; the `showHollowWorkspaces` setting restores those stops. The integration is opt-in (Settings > AeroSpace, or the `aerospaceIntegration` default) and everything falls back to plain native behavior the moment AeroSpace is absent or disabled.
-- Every piece is optional: independent Settings toggles turn off the app switcher, the window cycler, keyboard Space navigation, and the trackpad swipe. A disabled binding passes through to macOS immediately, so Cyclist can run as just a Spaces/workspace navigator - or just a switcher.
-- Four independent settings control what shows up in the list:
+- Every piece is optional: independent Settings toggles turn off the app switcher, the window switcher, keyboard Space navigation, and the trackpad swipe. A disabled binding passes through to macOS immediately, so Cyclist can run as just a Spaces/workspace navigator - or just a switcher.
+- Independent settings control what shows up. Two govern which windows are eligible in **both** the app switcher and the window switcher:
+  - include **minimized** windows (the ones parked in the Dock)
+  - include windows in **other Spaces** (including native fullscreen)
+- Two more apply to the **app switcher** only:
   - include **hidden** apps (Cmd+H)
-  - include **minimized** apps (all windows in the Dock)
-  - include apps whose windows live in **other Spaces** (including native fullscreen)
   - include running apps with **no windows** at all (off by default; selecting one behaves like clicking its Dock icon, so the app reopens a window)
 
 ## Keybindings
@@ -37,7 +38,7 @@ Global - work anytime:
 | ------------------- | --------------------------------------------- |
 | Cmd+Tab (quick tap) | Switch to the previous window (any app)       |
 | Cmd+Tab (hold Cmd)  | Open the switcher list (Shift reverses)       |
-| Cmd+`               | Cycle windows of the frontmost app            |
+| Cmd+`               | Switch windows of the frontmost app           |
 | Ctrl+Left / Right   | Previous / next workspace or fullscreen Space |
 | Trackpad swipe      | Previous / next workspace or fullscreen Space |
 
@@ -53,7 +54,7 @@ While the switcher is open (Cmd held):
 | Esc             | Cancel                          |
 | Release Cmd     | Switch to the selected item     |
 
-In the app switcher, Quit and Close keep the list open: the affected rows leave and the selection moves to a neighbor. In the window cycler, quitting the app ends the session (every row belonged to it).
+In the app switcher, Quit and Close keep the list open: the affected rows leave and the selection moves to a neighbor. In the window switcher, quitting the app ends the session (every row belonged to it).
 
 ## Requirements
 
@@ -93,29 +94,29 @@ Every setting lives in standard user defaults under the `cz.szypowi.cyclist` dom
 
 ```sh
 defaults write cz.szypowi.cyclist aerospaceIntegration -bool true
-defaults write cz.szypowi.cyclist switcherShortcut "alt+tab"
+defaults write cz.szypowi.cyclist switchAppsShortcut "alt+tab"
 ```
 
-| Key                       | Type   | Default        |
-| ------------------------- | ------ | -------------- |
-| `appSwitcher`             | bool   | `true`         |
-| `windowCycler`            | bool   | `true`         |
-| `includeHidden`           | bool   | `true`         |
-| `includeMinimized`        | bool   | `true`         |
-| `includeOtherSpaces`      | bool   | `true`         |
-| `includeNoWindows`        | bool   | `false`        |
-| `liveOtherSpaceTitles`    | bool   | `false`        |
-| `trackpadSwipe`           | bool   | `true`         |
-| `keyboardSpaceNavigation` | bool   | `true`         |
-| `showMenuBarIcon`         | bool   | `true`         |
-| `aerospaceIntegration`    | bool   | `false`        |
-| `showHollowWorkspaces`    | bool   | `false`        |
-| `switcherSize`            | string | `default`      |
-| `demoHud`                 | bool   | `false`        |
-| `switcherShortcut`        | string | `cmd+tab`      |
-| `cycleWindowsShortcut`    | string | `cmd+backtick` |
-| `previousSpaceShortcut`   | string | `ctrl+left`    |
-| `nextSpaceShortcut`       | string | `ctrl+right`   |
+| Key                        | Type   | Default        |
+| -------------------------- | ------ | -------------- |
+| `appSwitcher`              | bool   | `true`         |
+| `windowSwitcher`           | bool   | `true`         |
+| `showHiddenApps`           | bool   | `true`         |
+| `showMinimizedWindows`     | bool   | `true`         |
+| `showWindowsInOtherSpaces` | bool   | `true`         |
+| `showAppsWithNoWindow`     | bool   | `false`        |
+| `liveOtherSpaceTitles`     | bool   | `false`        |
+| `trackpadSwipe`            | bool   | `true`         |
+| `keyboardSpaceNavigation`  | bool   | `true`         |
+| `showMenuBarIcon`          | bool   | `true`         |
+| `aerospaceIntegration`     | bool   | `false`        |
+| `showHollowWorkspaces`     | bool   | `false`        |
+| `switcherSize`             | string | `default`      |
+| `demoHud`                  | bool   | `false`        |
+| `switchAppsShortcut`       | string | `cmd+tab`      |
+| `switchWindowsShortcut`    | string | `cmd+backtick` |
+| `previousSpaceShortcut`    | string | `ctrl+left`    |
+| `nextSpaceShortcut`        | string | `ctrl+right`   |
 
 `switcherSize` scales the switcher overlay - its text, icons, and spacing together - as one preset: `small`, `default`, `large`, or `extraLarge`. Larger reads more easily on a big or high-resolution display; smaller fits more windows on screen. A new value takes effect the next time the switcher opens. For system-wide magnification beyond this, macOS Zoom (System Settings > Accessibility > Zoom) enlarges any app.
 

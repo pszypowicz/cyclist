@@ -211,7 +211,7 @@ enum AppListProvider {
                               spaceByWindow: [Int: UInt64]) -> AppSweep? {
         let app = snapshotApp.app
         let hidden = snapshotApp.isHidden
-        if hidden && !inputs.includeHidden { return nil }
+        if hidden && !inputs.showHiddenApps { return nil }
         let name = snapshotApp.name
         var appEntries: [ListEntry] = []
         var titles: [(windowID: Int, title: String)] = []
@@ -229,7 +229,7 @@ enum AppListProvider {
             if let windowID = window.windowID {
                 seenByAX.insert(windowID)
             }
-            if window.isMinimized && !inputs.includeMinimized { continue }
+            if window.isMinimized && !inputs.showMinimizedWindows { continue }
             if let windowID = window.windowID, let title = window.title {
                 titles.append((windowID, title))
             }
@@ -244,7 +244,7 @@ enum AppListProvider {
                 : nil
             if space != nil || workspace != nil {
                 hasOtherSpaceWindows = true
-                if !inputs.includeOtherSpaces { continue }
+                if !inputs.showWindowsInOtherSpaces { continue }
             }
             let state: EntryState = space != nil ? .otherSpace
                 : workspace != nil ? .hiddenWorkspace
@@ -277,7 +277,7 @@ enum AppListProvider {
             guard !candidates.isEmpty else { continue }
             hasAnyWindow = true
             hasOtherSpaceWindows = true
-            guard inputs.includeOtherSpaces else { continue }
+            guard inputs.showWindowsInOtherSpaces else { continue }
             for windowID in candidates {
                 appEntries.append(ListEntry(
                     app: app,
@@ -292,7 +292,7 @@ enum AppListProvider {
             }
         }
 
-        if !hasAnyWindow && inputs.includeNoWindows {
+        if !hasAnyWindow && inputs.showAppsWithNoWindow {
             appEntries.append(ListEntry(
                 app: app,
                 appName: name,

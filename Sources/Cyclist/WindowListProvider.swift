@@ -40,7 +40,7 @@ enum WindowListProvider {
             if let windowID = window.windowID {
                 seenByAX.insert(windowID)
             }
-            if window.isMinimized && !inputs.includeMinimized { continue }
+            if window.isMinimized && !inputs.showMinimizedWindows { continue }
             if let windowID = window.windowID, let title = window.title {
                 AppListProvider.cacheTitle(title, windowID: windowID)
             }
@@ -62,7 +62,7 @@ enum WindowListProvider {
         // Windows AX cannot see: parked in non-visible native Spaces.
         // Titles from CGWindowList (Screen Recording holders) or the cache
         // of titles seen while the window was visible.
-        if inputs.includeOtherSpaces {
+        if inputs.showWindowsInOtherSpaces {
             for window in CGWindows.real([.optionAll, .excludeDesktopElements])
             where window.pid == app.processIdentifier {
                 guard let space = spaceByWindow[window.id], !seenByAX.contains(window.id) else { continue }

@@ -37,10 +37,10 @@ struct SnapshotInputs {
     let apps: [SnapshotApp]
     let ranks: [Int: UInt64]
     let aerospace: AeroSpaceClient.WorkspaceSnapshot
-    let includeHidden: Bool
-    let includeMinimized: Bool
-    let includeOtherSpaces: Bool
-    let includeNoWindows: Bool
+    let showHiddenApps: Bool
+    let showMinimizedWindows: Bool
+    let showWindowsInOtherSpaces: Bool
+    let showAppsWithNoWindow: Bool
 
     // Main thread only. The windows sweep never reads `apps`, so the
     // Cmd+` path skips the enumerate-filter-sort entirely (this block
@@ -60,10 +60,10 @@ struct SnapshotInputs {
             apps: apps,
             ranks: recency.ranksSnapshot(),
             aerospace: aerospace.workspaceSnapshot(),
-            includeHidden: Settings.includeHidden,
-            includeMinimized: Settings.includeMinimized,
-            includeOtherSpaces: Settings.includeOtherSpaces,
-            includeNoWindows: Settings.includeNoWindows
+            showHiddenApps: Settings.showHiddenApps,
+            showMinimizedWindows: Settings.showMinimizedWindows,
+            showWindowsInOtherSpaces: Settings.showWindowsInOtherSpaces,
+            showAppsWithNoWindow: Settings.showAppsWithNoWindow
         )
     }
 }

@@ -17,8 +17,7 @@ import Foundation
 // observably landed. Timers remain for swipes the Dock drops outright,
 // where no event ever fires. Posting is event-gated: each swipe waits for
 // the previous transition to land plus a short settle, which the
-// --measure-swipe-floor experiment shows never wedges the compositor
-// (unlike the blind time-based cadence this replaced).
+// --measure-swipe-floor experiment shows never wedges the compositor.
 final class SpaceNavigator {
     // First arrival check after a post: the WindowServer space event
     // normally wakes the step first (bookkeeping flips ~40ms after a
@@ -27,13 +26,10 @@ final class SpaceNavigator {
     private let verifyInterval: TimeInterval = 0.4
     private let maxAttempts = 3
     // Settle after a landed transition before the next post. Measured with
-    // --measure-swipe-floor on macOS 26: event-gated bursts never wedge
-    // the compositor at ANY gap (the historical wedge came from blind
-    // time-based posting that landed swipes mid-transition). Latest sweep
-    // (26.5): arrivals stay in the 15-45ms band down to a 50ms gap, with
-    // occasional ~500ms latency spikes appearing only below that - 50ms is
-    // the fastest sustained cadence that stays predictable. Re-measure
-    // after macOS updates. A post after idle goes out immediately.
+    // --measure-swipe-floor on macOS 26: event-gated bursts never wedge the
+    // compositor at any gap, and 50ms is the fastest sustained cadence that
+    // stays predictable. Re-measure after macOS updates. A post after idle
+    // goes out immediately.
     private let postSettleGap: TimeInterval = 0.05
 
     private var target: UInt64?

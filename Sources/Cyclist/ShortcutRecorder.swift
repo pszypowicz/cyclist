@@ -14,8 +14,8 @@ final class ShortcutRecorder: ObservableObject {
     @Published private(set) var message: String?
 
     static let labels: [String: String] = [
-        Settings.switcherShortcutKey: "Open switcher",
-        Settings.cycleWindowsShortcutKey: "Cycle app windows",
+        Settings.switchAppsShortcutKey: "Switch apps",
+        Settings.switchWindowsShortcutKey: "Switch windows",
         Settings.previousSpaceShortcutKey: "Previous Space",
         Settings.nextSpaceShortcutKey: "Next Space",
     ]

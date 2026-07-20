@@ -1,7 +1,7 @@
 import AppKit
 
-// State machine for a switcher session: the switcher binding (Cmd+Tab by
-// default) starts an app session, the cycle binding (Cmd+`) a window
+// State machine for a switcher session: the switch-apps binding (Cmd+Tab by
+// default) starts an app session, the switch-windows binding (Cmd+`) a window
 // session for the frontmost app. While the binding's modifiers are held,
 // its key advances (Shift reverses), Esc cancels, and releasing a
 // modifier commits the current selection. Bindings come from the cached
@@ -140,13 +140,13 @@ final class SwitcherController {
         // Disabled bindings pass through, so the native behavior is back
         // the moment the toggle flips - same per-matched-press defaults
         // read as the Space bindings below.
-        if shortcuts.switcher.matches(keyCode: keyCode, flags: flags) {
+        if shortcuts.switchApps.matches(keyCode: keyCode, flags: flags) {
             guard Settings.appSwitcher else { return .passed }
             advanceApps(backward: backward)
             return .consumed
         }
-        if shortcuts.cycleWindows.matches(keyCode: keyCode, flags: flags) {
-            guard Settings.windowCycler else { return .passed }
+        if shortcuts.switchWindows.matches(keyCode: keyCode, flags: flags) {
+            guard Settings.windowSwitcher else { return .passed }
             advanceWindows(backward: backward)
             return .consumed
         }
@@ -218,8 +218,8 @@ final class SwitcherController {
         // down; the first one released commits.
         let binding: Shortcut
         switch session {
-        case .apps, .pendingApps: binding = ShortcutSettings.shared.switcher
-        case .windows, .pendingWindows: binding = ShortcutSettings.shared.cycleWindows
+        case .apps, .pendingApps: binding = ShortcutSettings.shared.switchApps
+        case .windows, .pendingWindows: binding = ShortcutSettings.shared.switchWindows
         }
         let required = binding.modifiers.subtracting(.shift)
         guard !Shortcut.normalized(event.flags).isSuperset(of: required) else { return }
@@ -365,7 +365,7 @@ final class SwitcherController {
                 if case .pendingApps(let presses) = $0 { return (presses, ()) }
                 return nil
             },
-            emptyLog: "apps snapshot empty; consumed switcher tap dropped",
+            emptyLog: "apps snapshot empty; consumed app-switch tap dropped",
             initialIndex: { self.initialAppsIndex(items: $0, backward: $1) },
             commit: { items, index, _ in self.activate(items[index]) },
             present: { items, index, _ in
@@ -378,7 +378,7 @@ final class SwitcherController {
     // Mid Space-transition an app can blow the 0.05s AX messaging timeout
     // and list no windows at all; a session resolved against such a
     // CG-only list commits an other-Space row and mis-navigates (observed
-    // as back-to-back jumps to the same Space when the cycle binding is
+    // as back-to-back jumps to the same Space when the window-switch binding is
     // pressed rapidly across Spaces). An AX-blind sweep - as opposed to
     // one whose rows were merely filtered - retries once shortly; the
     // session stays pending and presses accumulate.
@@ -421,7 +421,7 @@ final class SwitcherController {
                 if case .pendingWindows(let app, let presses) = $0 { return (presses, app) }
                 return nil
             },
-            emptyLog: "window snapshot empty; consumed cycle tap dropped",
+            emptyLog: "window snapshot empty; consumed window-switch tap dropped",
             initialIndex: { items, backward in self.startIndex(count: items.count, backward: backward) },
             commit: { items, index, app in
                 let item = items[index]
