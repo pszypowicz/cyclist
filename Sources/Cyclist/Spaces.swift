@@ -159,8 +159,8 @@ enum Spaces {
 
     // A fullscreen Space carries companions besides the user's window: the
     // slide-down toolbar (full display width at ~88pt, layer 0 - it passes
-    // every CGWindowList realness heuristic and used to produce a phantom
-    // second switcher row), backdrop and shield windows. The WindowServer's
+    // every CGWindowList realness heuristic and would otherwise produce a
+    // phantom second switcher row), backdrop and shield windows. The WindowServer's
     // own records tell them apart: a window the user can hold carries tag
     // bit 0x1 (or the 0x2 + 0x80000000 combination) alongside attribute
     // bit 0x2 - the same predicate yabai filters with. One batched query
