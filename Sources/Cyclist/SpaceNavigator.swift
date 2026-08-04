@@ -27,9 +27,10 @@ final class SpaceNavigator {
     // post); the timers are the fallback for swipes the Dock drops.
     private let earlyVerifyInterval: TimeInterval = 0.15
     private let verifyInterval: TimeInterval = 0.4
-    // Single-shot: one post per navigation, a drop ends in "gave up"
-    // instead of a repost. Raise to restore the retry loop.
-    private let maxAttempts = 1
+    // Verify wakes an outstanding post may fail before the navigation
+    // concludes the Dock dropped it and gives up (~1.5s with the timer
+    // cadence; the event wake usually settles it in one).
+    private let maxInFlightChecks = 3
     // Settle after a landed transition before the next post. Measured with
     // --measure-swipe-floor on macOS 26: event-gated bursts never wedge the
     // compositor at any gap, and 50ms is the fastest sustained cadence that
@@ -40,7 +41,6 @@ final class SpaceNavigator {
     private var target: UInt64?
     private var onArrival: (() -> Void)?
     private var stepWork: DispatchWorkItem?
-    private var attempts = 0
     // Dock-side state that survives cancel(): the Dock's settling does not
     // care that a navigation was replaced. `outstandingPost` is the Space a
     // posted swipe is still carrying the display toward; until the
@@ -74,9 +74,8 @@ final class SpaceNavigator {
 
     // Returns false when the active display's Space order does not contain
     // the target: the dock swipes act on the active display only, so a
-    // target on another display would displace the wrong display's Spaces
-    // (worse with every retry). `onArrival` runs once, after the Space
-    // change is verified.
+    // target on another display would displace the wrong display's Spaces.
+    // `onArrival` runs once, after the Space change is verified.
     func begin(to spaceID: UInt64, onArrival: (() -> Void)? = nil) -> Bool {
         guard Spaces.activeDisplayInfo()?.order.contains(spaceID) == true else { return false }
         if let replaced = target, replaced != spaceID {
@@ -102,7 +101,6 @@ final class SpaceNavigator {
         stepWork = nil
         target = nil
         onArrival = nil
-        attempts = 0
     }
 
     private func step() {
@@ -117,15 +115,20 @@ final class SpaceNavigator {
             if info.current == outstanding {
                 outstandingPost = nil
                 lastLanded = Date()
-            } else if inFlightChecks < 3 {
+            } else if inFlightChecks < maxInFlightChecks {
                 inFlightChecks += 1
                 Log.debug("navigator: swipe to \(outstanding) not landed, current=\(info.current) (check \(inFlightChecks))")
                 schedule(after: verifyInterval)
                 return
             } else {
-                // Never landed: the Dock dropped it. Fall through and let
-                // the normal repost/arrival logic act on the real state.
+                // The Dock never acted on the post. Single-shot means the
+                // navigation is over; this line is the tripwire for any
+                // drop scenario the three-phase gesture does not cover.
+                Log.write("navigator gave up: swipe to \(outstanding) never landed,"
+                    + " current=\(info.current) target=\(target)")
                 outstandingPost = nil
+                cancel()
+                return
             }
         }
         if targetIndex == currentIndex {
@@ -141,11 +144,6 @@ final class SpaceNavigator {
             return
         }
 
-        guard attempts < maxAttempts else {
-            Log.write("navigator gave up: stalled at space=\(info.current) target=\(target)")
-            cancel()
-            return
-        }
         if let landed = lastLanded {
             let sinceLanded = Date().timeIntervalSince(landed)
             if sinceLanded < postSettleGap {
@@ -154,11 +152,10 @@ final class SpaceNavigator {
                 return
             }
         }
-        attempts += 1
         let right = targetIndex > currentIndex
         let distance = abs(targetIndex - currentIndex)
         let sinceLanded = lastLanded.map { "\(Int(Date().timeIntervalSince($0) * 1000))ms" } ?? "-"
-        Log.write("navigator jump (swipe x\(distance), attempt \(attempts), sinceLanded=\(sinceLanded)): \(info.current) -> \(target)")
+        Log.write("navigator jump (swipe x\(distance), sinceLanded=\(sinceLanded)): \(info.current) -> \(target)")
         Spaces.postDockSwipes(right: right, steps: distance)
         outstandingPost = target
         inFlightChecks = 0
