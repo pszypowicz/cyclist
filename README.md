@@ -126,7 +126,7 @@ Shortcut strings are modifiers and a key joined with `+`: `cmd`, `alt`, `ctrl`, 
 
 ## Known limitations
 
-- Cyclist consumes the Previous/Next Space shortcuts (Ctrl+Left/Right by default) for chain navigation; disable the equivalent Mission Control shortcuts if you do not want both meanings, or turn off "Keyboard Space navigation" in Settings. Quitting Cyclist brings the native behavior back.
+- Cyclist consumes the Previous/Next Space shortcuts (Ctrl+Left/Right by default) for chain navigation; disable the equivalent Mission Control shortcuts if you do not want both meanings, or turn off "Keyboard Space navigation" in Settings. Quitting Cyclist brings the native behavior back. While Mission Control or App Exposé is open, both the shortcuts and the trackpad swipe pass through to macOS, so they keep their native meaning inside the overlay.
 - Cyclist also consumes the trackpad Spaces-swipe gesture while "Trackpad swipe navigation" is on; flip the Settings toggle to get the native animated swipe back without quitting. One swipe is one step - a long swipe does not scrub across several Spaces.
 - While a password field has secure input enabled, macOS withholds keystrokes from event taps, so Cmd+Tab temporarily falls through to the native switcher.
 - Same-app window rows for other Spaces rely on the window-server list; their titles need Screen Recording permission or a previous sighting of the window (same rule as the app switcher's other-Space rows).

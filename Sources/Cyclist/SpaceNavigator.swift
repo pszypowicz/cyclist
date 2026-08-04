@@ -2,12 +2,15 @@ import Foundation
 
 // Jumps to a target Space with synthetic dock-swipe gestures (~40ms, no
 // animation, any distance, fullscreen Spaces included), verifying arrival
-// shortly after firing and retrying while attempts remain: the Dock
-// sometimes drops a gesture fired shortly after a completed transition
-// (and a dropped gesture can still half-apply, moving focus while the
-// Space stays). Every step recomputes the remaining distance from the real
-// Space state before acting, and on verified arrival the target window is
-// made key.
+// shortly after firing: the work chained on arrival (window focus, the
+// AeroSpace two-hop's workspace switch, the chrome heal) must only run
+// once the Space change is real. Posting is single-shot - the three-phase
+// gesture shape (Spaces.postDockSwipes) measures drop-free even at zero
+// settle gap (scripts/gesture-shape-experiment.swift), so a navigation
+// that never lands logs "gave up" as the signal to re-evaluate rather
+// than reposting blind. Every step recomputes the remaining distance from
+// the real Space state before acting, and on verified arrival the target
+// window is made key.
 //
 // The WindowServer's own Space-change events wake the step loop the moment
 // its bookkeeping flips. They are hints only, never arrival truth: they
@@ -24,7 +27,9 @@ final class SpaceNavigator {
     // post); the timers are the fallback for swipes the Dock drops.
     private let earlyVerifyInterval: TimeInterval = 0.15
     private let verifyInterval: TimeInterval = 0.4
-    private let maxAttempts = 3
+    // Single-shot: one post per navigation, a drop ends in "gave up"
+    // instead of a repost. Raise to restore the retry loop.
+    private let maxAttempts = 1
     // Settle after a landed transition before the next post. Measured with
     // --measure-swipe-floor on macOS 26: event-gated bursts never wedge the
     // compositor at any gap, and 50ms is the fastest sustained cadence that
