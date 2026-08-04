@@ -160,6 +160,13 @@ final class SwitcherController {
             let previousSpace = shortcuts.previousSpace.matches(keyCode: keyCode, flags: flags)
             if previousSpace || shortcuts.nextSpace.matches(keyCode: keyCode, flags: flags),
                Settings.keyboardSpaceNav {
+                // Inside Mission Control or App Exposé the combo moves the
+                // overlay's own selection; the window-list check runs only
+                // on this rare matched path, never per keystroke.
+                if DockOverlay.isActive() {
+                    Log.write("space nav: dock overlay active, passing through")
+                    return .passed
+                }
                 let trigger = (previousSpace ? shortcuts.previousSpace : shortcuts.nextSpace).display
                 // Space navigation, handled off the tap callback so nothing
                 // can stall event delivery.

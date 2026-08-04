@@ -8,10 +8,12 @@ import Foundation
 // trackpad equivalent of one Ctrl+Left/Right press. Every event of a real
 // horizontal dock swipe is consumed, so the Dock never starts its own
 // animated transition; vertical dock swipes (Mission Control, App Exposé)
-// pass through untouched.
+// pass through untouched. So does the whole gesture when a Dock overlay
+// is already up when it starts: a swipe inside Mission Control scrubs the
+// overlay's view, and that meaning belongs to the Dock.
 //
 // Reads the same undocumented gesture-event encoding that
-// Spaces.postDockSwipePair writes: a dock-swipe payload carries
+// Spaces.postDockSwipeGesture writes: a dock-swipe payload carries
 // IOHIDEventType 23 in field 110, motion axis in field 123 (1 =
 // horizontal), cumulative progress in field 124 (screen-widths, positive
 // toward the Space on the right), X velocity in field 129, and the
@@ -41,6 +43,10 @@ final class DockSwipeRecognizer {
     var onSwipe: ((_ left: Bool) -> Void)?
 
     private var fired = false
+    // A gesture that started while a Dock overlay was up is the overlay's:
+    // the decision is made at the opening phase and held for the rest of
+    // the gesture, so the Dock receives every phase of it or none.
+    private var passingThrough = false
 
     // Returns true when the event belongs to a real horizontal dock swipe,
     // which must not reach the Dock.
@@ -51,6 +57,19 @@ final class DockSwipeRecognizer {
             return false
         }
         let phase = event.getIntegerValueField(gesturePhaseField)
+        if phase == 1 || phase == 128 {  // began / may begin
+            let wasPassing = passingThrough
+            passingThrough = DockOverlay.isActive()
+            if passingThrough, !wasPassing {
+                Log.write("swipe: dock overlay active, passing gesture through")
+            }
+        }
+        if passingThrough {
+            if phase == 4 || phase == 8 {  // ended / cancelled
+                passingThrough = false
+            }
+            return false
+        }
         let progress = event.getDoubleValueField(swipeProgressField)
         let velocity = event.getDoubleValueField(swipeVelocityXField)
         Log.debug("swipe: phase=\(phase) progress=\(progress) velocity=\(velocity)")

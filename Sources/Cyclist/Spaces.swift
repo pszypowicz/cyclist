@@ -247,14 +247,13 @@ enum Spaces {
 
     // Instant Space switch: synthetic trackpad dock-swipe gestures with
     // high velocity, so the Dock switches with no animation (~40ms
-    // observed). One gesture pair per step, with velocity scaled by the
-    // step count.
+    // observed). One three-phase gesture per step, with velocity scaled
+    // by the step count.
     static func postDockSwipes(right: Bool, steps: Int) {
         let count = max(1, steps)
-        let progress = right ? 2.0 : -2.0
-        let velocity = (right ? 400.0 : -400.0) * Double(count)
+        let velocity = (right ? 2000.0 : -2000.0) * Double(count)
         for _ in 0..<count {
-            postDockSwipePair(right: right, progress: progress, velocity: velocity)
+            postDockSwipeGesture(right: right, velocity: velocity)
         }
     }
 
@@ -325,51 +324,46 @@ enum Spaces {
     }
 
     // Undocumented CGEvent field indices posted through the public
-    // CGEventPost; the exact encoding follows Space Rabbit
-    // (github.com/Tahul/space-rabbit): direction as a plain 0/1 integer in
-    // the flag-bits field, Began+Ended phases only, progress and velocity
-    // on Ended. Unlike the iss/Spaceman float-bit-pattern encoding, this
-    // shape also switches between two fullscreen Spaces and chains
-    // multi-step jumps with no delay.
-    private static func postDockSwipePair(right: Bool, progress: Double, velocity: Double) {
+    // CGEventPost; the exact encoding follows InstantSpaceSwitcher
+    // (github.com/jurplel/InstantSpaceSwitcher): one dock event per phase -
+    // Began, Changed, Ended - no gesture envelope, direction carried only
+    // by the sign of progress and velocity, progress at +-FLT_TRUE_MIN and
+    // the velocity mirrored onto both axis fields in every phase. The
+    // Changed phase is the part Mission Control requires: without it the
+    // Dock ignores the gesture outright while Mission Control or App
+    // Exposé is open, with it the same gesture moves the shown Space and
+    // the overlay stays up, matching a real trackpad swipe. The progress
+    // epsilon matters just as much: a full-magnitude progress on Changed
+    // makes the Dock run its ~1.2s animated transition instead of the
+    // instant snap. Measured with scripts/gesture-shape-experiment.swift
+    // on macOS 26; re-measure after macOS updates.
+    private static func postDockSwipeGesture(right: Bool, velocity: Double) {
         let eventTypeField = CGEventField(rawValue: 55)!       // real CGS event type
         let gestureHIDTypeField = CGEventField(rawValue: 110)! // IOHIDEventType
-        let scrollYField = CGEventField(rawValue: 119)!
         let swipeMotionField = CGEventField(rawValue: 123)!
         let swipeProgressField = CGEventField(rawValue: 124)!
         let swipeVelocityXField = CGEventField(rawValue: 129)!
         let swipeVelocityYField = CGEventField(rawValue: 130)!
         let gesturePhaseField = CGEventField(rawValue: 132)!
-        let flagBitsField = CGEventField(rawValue: 135)!
-        let zoomDeltaXField = CGEventField(rawValue: 139)!
 
-        let flagDirection: Int64 = right ? 1 : 0
+        let sign = right ? 1.0 : -1.0
 
-        func postPair(phase: Int64) {
-            guard let dockEvent = CGEvent(source: nil),
-                  let gestureEvent = CGEvent(source: nil) else { return }
+        func post(phase: Int64) {
+            guard let dockEvent = CGEvent(source: nil) else { return }
             dockEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
-            gestureEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
             dockEvent.setIntegerValueField(eventTypeField, value: 30)      // DockControl
             dockEvent.setIntegerValueField(gestureHIDTypeField, value: 23) // dock swipe
             dockEvent.setIntegerValueField(gesturePhaseField, value: phase)
-            dockEvent.setIntegerValueField(flagBitsField, value: flagDirection)
             dockEvent.setIntegerValueField(swipeMotionField, value: 1)     // horizontal
-            dockEvent.setDoubleValueField(scrollYField, value: 0)
-            // A zero zoom delta makes the Dock discard the event as a no-op.
-            dockEvent.setDoubleValueField(zoomDeltaXField, value: Double(Float.leastNonzeroMagnitude))
-            if phase == 4 {  // ended: the phase where the Dock decides to snap
-                dockEvent.setDoubleValueField(swipeProgressField, value: progress)
-                dockEvent.setDoubleValueField(swipeVelocityXField, value: velocity)
-                dockEvent.setDoubleValueField(swipeVelocityYField, value: 0)
-            }
-            gestureEvent.setIntegerValueField(eventTypeField, value: 29)   // gesture envelope
+            dockEvent.setDoubleValueField(swipeProgressField, value: sign * Double(Float.leastNonzeroMagnitude))
+            dockEvent.setDoubleValueField(swipeVelocityXField, value: velocity)
+            dockEvent.setDoubleValueField(swipeVelocityYField, value: velocity)
             dockEvent.post(tap: .cgSessionEventTap)
-            gestureEvent.post(tap: .cgSessionEventTap)
         }
 
-        postPair(phase: 1)  // began
-        postPair(phase: 4)  // ended
+        post(phase: 1)  // began
+        post(phase: 2)  // changed
+        post(phase: 4)  // ended
     }
 
 }
