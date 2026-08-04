@@ -258,6 +258,72 @@ enum Spaces {
         }
     }
 
+    // In-place companion repaint for fullscreen Spaces (#63). After display
+    // sleep the WindowServer purges the backing stores of windows on
+    // non-visible Spaces; the instant snap never re-requests their contents,
+    // so the fullscreen toolbar companion composites as nothing (it exposes
+    // no AX element the repaint nudge could move, and unlike WebKit content
+    // the AppKit chrome never repopulates itself). Ramping a dock swipe to
+    // ~2pt of slide and cancelling runs enough of the Dock's transition
+    // choreography that the WindowServer re-requests window contents,
+    // without committing a switch. Measured on macOS 26.6: a bare
+    // began/cancelled pair with no changed frames does not heal, ~2pt is
+    // the floor with margin, and closing with the ended phase always
+    // commits a switch regardless of its progress (the Dock latches the
+    // commit during the changed ramp), so cancelled is the only closing
+    // phase that stays put. Frames are scheduled, not slept, to keep the
+    // main run loop free.
+    static func postFullscreenChromeHeal(right: Bool) {
+        let width = CGDisplayBounds(activeDisplayID() ?? CGMainDisplayID()).width
+        let sign = right ? 1.0 : -1.0
+        let peak = sign * 2.0 / width
+        postHealFrame(phase: 1, right: right, progress: 0)
+        var delay: TimeInterval = 0
+        for fraction in [0.25, 0.5, 0.75, 1.0, 0.6, 0.25] {
+            delay += 0.016
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                postHealFrame(phase: 2, right: right, progress: peak * fraction)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.016) {
+            postHealFrame(phase: 8, right: right, progress: 0)  // cancelled
+        }
+    }
+
+    // One heal frame; unlike postDockSwipePair the progress and velocity
+    // fields are set on every phase, matching the validated gesture shape.
+    private static func postHealFrame(phase: Int64, right: Bool, progress: Double) {
+        let eventTypeField = CGEventField(rawValue: 55)!
+        let gestureHIDTypeField = CGEventField(rawValue: 110)!
+        let scrollYField = CGEventField(rawValue: 119)!
+        let swipeMotionField = CGEventField(rawValue: 123)!
+        let swipeProgressField = CGEventField(rawValue: 124)!
+        let swipeVelocityXField = CGEventField(rawValue: 129)!
+        let swipeVelocityYField = CGEventField(rawValue: 130)!
+        let gesturePhaseField = CGEventField(rawValue: 132)!
+        let flagBitsField = CGEventField(rawValue: 135)!
+        let zoomDeltaXField = CGEventField(rawValue: 139)!
+
+        guard let dockEvent = CGEvent(source: nil),
+              let gestureEvent = CGEvent(source: nil) else { return }
+        dockEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
+        gestureEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
+        dockEvent.setIntegerValueField(eventTypeField, value: 30)      // DockControl
+        dockEvent.setIntegerValueField(gestureHIDTypeField, value: 23) // dock swipe
+        dockEvent.setIntegerValueField(gesturePhaseField, value: phase)
+        dockEvent.setIntegerValueField(flagBitsField, value: right ? 1 : 0)
+        dockEvent.setIntegerValueField(swipeMotionField, value: 1)     // horizontal
+        dockEvent.setDoubleValueField(scrollYField, value: 0)
+        // A zero zoom delta makes the Dock discard the event as a no-op.
+        dockEvent.setDoubleValueField(zoomDeltaXField, value: Double(Float.leastNonzeroMagnitude))
+        dockEvent.setDoubleValueField(swipeProgressField, value: progress)
+        dockEvent.setDoubleValueField(swipeVelocityXField, value: 0)
+        dockEvent.setDoubleValueField(swipeVelocityYField, value: 0)
+        gestureEvent.setIntegerValueField(eventTypeField, value: 29)   // gesture envelope
+        dockEvent.post(tap: .cgSessionEventTap)
+        gestureEvent.post(tap: .cgSessionEventTap)
+    }
+
     // Undocumented CGEvent field indices posted through the public
     // CGEventPost; the exact encoding follows Space Rabbit
     // (github.com/Tahul/space-rabbit): direction as a plain 0/1 integer in
