@@ -73,6 +73,8 @@ struct SwitcherRow {
 final class SwitcherViewModel: ObservableObject {
     @Published var rows: [SwitcherRow] = []
     @Published var selected: Int = 0
+    // Shown in place of the list when a session has nothing to cycle.
+    @Published var placeholder: String?
 }
 
 struct SwitcherView: View {
@@ -83,6 +85,17 @@ struct SwitcherView: View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+                    if model.rows.isEmpty, let placeholder = model.placeholder {
+                        // Dimmed, centered, and never highlighted: it states a
+                        // result, and nothing here is selectable.
+                        Text(placeholder)
+                            .font(.system(size: metrics.titleFontSize))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .padding(.horizontal, metrics.rowHorizontalPadding)
+                            .frame(maxWidth: .infinity, minHeight: metrics.rowHeight)
+                    }
                     ForEach(Array(model.rows.enumerated()), id: \.offset) { index, row in
                         HStack {
                             if let icon = row.icon {
@@ -189,10 +202,21 @@ final class SwitcherPanel {
     }
 
     func setRows(_ rows: [SwitcherRow], selected: Int) {
+        model.placeholder = nil
         model.rows = rows
         model.selected = selected
         // Rows can shrink mid-session (quit/close from the list); a visible
         // panel resizes to fit instead of keeping dead space.
+        if panel.isVisible {
+            layout()
+        }
+    }
+
+    // Show the given message instead of a list.
+    func setPlaceholder(_ message: String) {
+        model.rows = []
+        model.selected = 0
+        model.placeholder = message
         if panel.isVisible {
             layout()
         }
@@ -254,7 +278,9 @@ final class SwitcherPanel {
     private func layout() {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let frame = screen.visibleFrame
-        let rows = CGFloat(model.rows.count)
+        // The placeholder stands in for exactly one row, so the empty state
+        // gets a panel the size of a one-row list instead of a bare sliver.
+        let rows = model.rows.isEmpty && model.placeholder != nil ? 1 : CGFloat(model.rows.count)
         let content = rows * metrics.rowHeight + max(0, rows - 1) * metrics.rowSpacing
             + metrics.contentPadding * 2
         // A tall list scrolls inside the panel; never let the largest preset
