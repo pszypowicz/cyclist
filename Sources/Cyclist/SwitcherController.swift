@@ -17,6 +17,8 @@ final class SwitcherController {
     private lazy var chain = ChainNavigator(navigator: navigator, aerospace: aerospace, recency: recency)
 
     private enum Session {
+        enum Kind { case apps, windows }
+
         // Snapshot still building off the tap callback. `presses` records
         // each Tab/backtick press as its Shift state (never empty) so the
         // completion replays them through the same start-index and step
@@ -25,6 +27,12 @@ final class SwitcherController {
         case pendingWindows(NSRunningApplication, presses: [Bool])
         case apps([ListEntry], index: Int)
         case windows(NSRunningApplication, [WindowItem], index: Int)
+        // The snapshot came back with nothing to cycle. The session holds
+        // the empty panel up until the binding is released, so the press
+        // reads as answered rather than as a hotkey that does nothing.
+        // There is no selection here: list keys and the release commit
+        // nothing.
+        case empty(Kind)
     }
     private var session: Session?
     // Guards pending completions: a snapshot that resolves after its session
@@ -44,6 +52,7 @@ final class SwitcherController {
     // finished one.
     private var pendingCommits: [(generation: Int, session: Session)] = []
     private var showPanelWork: DispatchWorkItem?
+    private var emptyFlashWork: DispatchWorkItem?
     // Invalidates async focus fallbacks (an AeroSpace focus command can
     // fail up to its timeout later) once a newer activation happened;
     // native arrivals are covered by navigator.cancel() instead.
@@ -214,7 +223,9 @@ final class SwitcherController {
             advanceApps(backward: backward)
         case .windows, .pendingWindows:
             advanceWindows(backward: backward)
-        case nil:
+        // Nothing to step through, and re-running the sweep on every press
+        // would hammer the AX sweep for a list that was just empty.
+        case .empty, nil:
             break
         }
     }
@@ -227,6 +238,9 @@ final class SwitcherController {
         switch session {
         case .apps, .pendingApps: binding = ShortcutSettings.shared.switchApps
         case .windows, .pendingWindows: binding = ShortcutSettings.shared.switchWindows
+        case .empty(let kind):
+            binding = kind == .apps ? ShortcutSettings.shared.switchApps
+                                    : ShortcutSettings.shared.switchWindows
         }
         let required = binding.modifiers.subtracting(.shift)
         guard !Shortcut.normalized(event.flags).isSuperset(of: required) else { return }
@@ -236,6 +250,9 @@ final class SwitcherController {
             self.session = nil
         case .apps, .windows:
             commit()
+        case .empty:
+            // The release ends the session and takes the empty state down.
+            cancel()
         }
     }
 
@@ -249,7 +266,7 @@ final class SwitcherController {
             // A press while the snapshot builds advances the pending
             // selection.
             session = .pendingApps(presses: presses + [backward])
-        case .windows, .pendingWindows:
+        case .windows, .pendingWindows, .empty:
             break
         case nil:
             // The AX sweep runs on the snapshot queue, so the main run
@@ -298,7 +315,7 @@ final class SwitcherController {
             panel.select(index: next)
         case .pendingWindows(let app, let presses):
             session = .pendingWindows(app, presses: presses + [backward])
-        case .apps, .pendingApps:
+        case .apps, .pendingApps, .empty:
             break
         case nil:
             guard let app = frontmostForSessions() else { return }
@@ -318,9 +335,11 @@ final class SwitcherController {
     // through the generation guards untouched.
     private func finishSnapshot<Item, Context>(
         _ items: [Item], generation: Int,
+        kind: Session.Kind,
         cacheElement: (Item) -> (windowID: Int?, element: AXUIElement?),
         pendingSession: (Session) -> (presses: [Bool], context: Context)?,
         emptyLog: String,
+        emptyMessage: (Context) -> String,
         initialIndex: ([Item], _ backward: Bool) -> Int,
         commit: ([Item], Int, Context) -> Void,
         present: ([Item], Int, Context) -> Void
@@ -345,6 +364,7 @@ final class SwitcherController {
             guard let (presses, context) = pendingSession(pendingEntry.session) else { return }
             guard !items.isEmpty else {
                 Log.write(emptyLog)
+                flashEmptyPanel(emptyMessage(context))
                 return
             }
             appliedGeneration = generation
@@ -356,7 +376,8 @@ final class SwitcherController {
               let (presses, context) = session.flatMap(pendingSession) else { return }
         guard !items.isEmpty else {
             Log.write(emptyLog)
-            session = nil
+            session = .empty(kind)
+            presentEmptyPanel(emptyMessage(context))
             return
         }
         appliedGeneration = generation
@@ -367,12 +388,14 @@ final class SwitcherController {
     private func finishAppsSnapshot(_ items: [ListEntry], generation: Int) {
         finishSnapshot(
             items, generation: generation,
+            kind: .apps,
             cacheElement: { ($0.windowID, $0.axWindow) },
             pendingSession: {
                 if case .pendingApps(let presses) = $0 { return (presses, ()) }
                 return nil
             },
-            emptyLog: "apps snapshot empty; consumed app-switch tap dropped",
+            emptyLog: "apps snapshot empty; nothing to switch to",
+            emptyMessage: { _ in "No apps to switch to" },
             initialIndex: { self.initialAppsIndex(items: $0, backward: $1) },
             commit: { items, index, _ in self.activate(items[index]) },
             present: { items, index, _ in
@@ -423,12 +446,17 @@ final class SwitcherController {
     private func finishWindowsSnapshot(_ items: [WindowItem], generation: Int) {
         finishSnapshot(
             items, generation: generation,
+            kind: .windows,
             cacheElement: { ($0.windowID, $0.element) },
             pendingSession: {
                 if case .pendingWindows(let app, let presses) = $0 { return (presses, app) }
                 return nil
             },
-            emptyLog: "window snapshot empty; consumed window-switch tap dropped",
+            emptyLog: "window snapshot empty; the app lists no windows",
+            // States what the sweep found, not what exists: a sweep that
+            // timed out mid-Space-transition also lands here, and the app
+            // does have windows then.
+            emptyMessage: { "No windows found for \($0.localizedName ?? "this app")" },
             initialIndex: { items, backward in self.startIndex(count: items.count, backward: backward) },
             commit: { items, index, app in
                 let item = items[index]
@@ -550,7 +578,7 @@ final class SwitcherController {
             Log.write("quit: app=\(app.localizedName ?? "?") pid=\(app.processIdentifier)")
             app.terminate()
             cancel()
-        case .pendingApps, .pendingWindows, nil:
+        case .pendingApps, .pendingWindows, .empty, nil:
             break
         }
     }
@@ -587,7 +615,7 @@ final class SwitcherController {
             let clamped = min(index, remaining.count - 1)
             session = .windows(app, remaining, index: clamped)
             panel.setRows(windowRows(app, remaining), selected: clamped)
-        case .pendingApps, .pendingWindows, nil:
+        case .pendingApps, .pendingWindows, .empty, nil:
             break
         }
     }
@@ -619,18 +647,54 @@ final class SwitcherController {
         return item.isMinimized ? "minimized" : nil
     }
 
-    // Delay showing the panel slightly so a quick Cmd+Tab tap switches to the
-    // previous window without a visual flash.
     private func presentPanel(rows: [SwitcherRow], selected: Int) {
         panel.setRows(rows, selected: selected)
+        schedulePanel()
+    }
+
+    // Nothing to cycle, but the binding is still held: the panel opens on
+    // the same grace delay a list gets and stays until the release.
+    private func presentEmptyPanel(_ message: String) {
+        Log.write("panel: empty state held - \(message)")
+        panel.setPlaceholder(message)
+        schedulePanel()
+    }
+
+    // Delay showing the panel slightly so a quick Cmd+Tab tap switches to the
+    // previous window without a visual flash.
+    private func schedulePanel() {
+        emptyFlashWork?.cancel()
+        emptyFlashWork = nil
         let work = DispatchWorkItem { [weak self] in self?.panel.show() }
         showPanelWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
     }
 
+    // The quick-tap counterpart: the binding came up before the snapshot
+    // resolved, so no release is left to take the panel down and the empty
+    // state runs on a fixed dwell instead - long enough to read without
+    // lingering past the gesture.
+    private func flashEmptyPanel(_ message: String) {
+        // A newer session already owns the panel - its own result speaks.
+        guard session == nil else { return }
+        Log.write("panel: empty state flashed - \(message)")
+        dismissPanel()
+        panel.setPlaceholder(message)
+        panel.show()
+        let work = DispatchWorkItem { [weak self] in
+            // A session started during the dwell: leave its panel alone.
+            guard let self, self.session == nil else { return }
+            self.panel.hide()
+        }
+        emptyFlashWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
+    }
+
     private func dismissPanel() {
         showPanelWork?.cancel()
         showPanelWork = nil
+        emptyFlashWork?.cancel()
+        emptyFlashWork = nil
         panel.hide()
     }
 
@@ -642,10 +706,11 @@ final class SwitcherController {
     private func commit() {
         guard let session else { return }
         switch session {
-        case .pendingApps, .pendingWindows:
+        case .pendingApps, .pendingWindows, .empty:
             // Unreachable: the only caller is handleFlagsChanged's
             // .apps/.windows arm. Pending sessions commit from their
-            // snapshot completion instead.
+            // snapshot completion instead, and an empty session has no
+            // selection to commit.
             return
         case .apps(let items, let index):
             self.session = nil
