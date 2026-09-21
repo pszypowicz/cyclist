@@ -276,13 +276,21 @@ enum Spaces {
     // frames reach the Dock like any other gesture, and a swipe posted into
     // the middle of one is dropped.
     static func postFullscreenChromeHeal(right: Bool) {
+        // An open ramp is closed first. Bumping the generation alone would
+        // strand it: its own closing frame would fail the guard, leaving the
+        // Dock holding a gesture that never ends.
+        cancelChromeHeal()
+
         let width = CGDisplayBounds(activeDisplayID() ?? CGMainDisplayID()).width
         let peak = (right ? -1.0 : 1.0) * postedSwipeSign * 2.0 / width
+        // The gesture counts as open only once its began frame is really
+        // out, so a construction failure cannot leave the flag claiming a
+        // gesture that was never started.
+        guard healFrame(phase: 1, progress: 0) else { return }
         healGeneration += 1
         let generation = healGeneration
         healInFlight = true
 
-        healFrame(phase: 1, progress: 0)  // began
         var delay: TimeInterval = 0
         for fraction in [0.25, 0.5, 0.75, 1.0, 0.6, 0.25] {
             delay += 0.016
@@ -293,36 +301,48 @@ enum Spaces {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.016) {
             guard healGeneration == generation else { return }
-            healInFlight = false
-            healFrame(phase: 8, progress: 0)  // cancelled
+            closeHeal()
         }
     }
 
-    // Closes an in-flight heal at once. Returns whether one was open, so the
-    // caller can pace its own post away from the closing frame.
+    // Closes an in-flight heal at once. Returns whether one was open, so a
+    // caller can tell an interrupted ramp from no ramp at all.
     @discardableResult
     static func cancelChromeHeal() -> Bool {
         guard healInFlight else { return false }
         healGeneration += 1
-        healInFlight = false
-        healFrame(phase: 8, progress: 0)  // cancelled
+        closeHeal()
         return true
     }
+
+    // When a ramp last stopped, however it stopped. Posting a swipe right
+    // behind the closing frame risks the same drop an interrupted ramp
+    // does, so navigation paces off this as well as off its own landing.
+    private(set) static var lastHealClose: Date?
 
     private static var healGeneration = 0
     private static var healInFlight = false
 
-    // One ramp frame. Carries no velocity, so nothing commits.
-    private static func healFrame(phase: Int64, progress: Double) {
-        guard let event = CGEvent(source: nil) else { return }
+    private static func closeHeal() {
+        healFrame(phase: 8, progress: 0)  // cancelled
+        healInFlight = false
+        lastHealClose = Date()
+    }
+
+    // One ramp frame. Carries no velocity, so nothing commits. Returns
+    // whether the frame actually went out.
+    @discardableResult
+    private static func healFrame(phase: Int64, progress: Double) -> Bool {
+        guard let event = CGEvent(source: nil) else { return false }
         event.setIntegerValueField(cgsEventTypeField, value: 30)      // DockControl
         event.setIntegerValueField(gestureHIDTypeField, value: 23)    // dock swipe
         event.setIntegerValueField(gesturePhaseField, value: phase)
         event.setIntegerValueField(swipeMotionField, value: 1)        // horizontal
         event.setDoubleValueField(swipePositionXField, value: 0.1)
         event.setDoubleValueField(swipeProgressField, value: progress)
-        guard let augmentedEvent = augmented(event) else { return }
+        guard let augmentedEvent = augmented(event) else { return false }
         postPair(augmentedEvent)
+        return true
     }
 
     // The same ramp driven synchronously, for --heal-experiment: a CLI run
