@@ -244,36 +244,116 @@ func windowMeta(_ ids: [Int]) -> [Int: (owner: String, bounds: CGRect)] {
 
 // MARK: - Synthetic dock-swipe posting (same encoding as Spaces.swift)
 
+// The Dock reads the gesture from a serialized IOHID queue payload in field
+// 4205, so every event is round-tripped through its serialized form to carry
+// one, and each dock event is followed by a companion gesture event. Keep
+// this in step with Spaces.swift.
 let syntheticGestureTag: Int64 = 0x4359434C  // "CYCL", so a running Cyclist passes these through
-let eventTypeField = CGEventField(rawValue: 55)!
+let rawIOHIDPayloadField = 4205
+let cgsEventTypeField = CGEventField(rawValue: 55)!
 let gestureHIDTypeField = CGEventField(rawValue: 110)!
-let scrollYField = CGEventField(rawValue: 119)!
+let swipeMaskField = CGEventField(rawValue: 115)!
 let swipeMotionField = CGEventField(rawValue: 123)!
 let swipeProgressField = CGEventField(rawValue: 124)!
+let swipePositionXField = CGEventField(rawValue: 125)!
+let swipePositionYField = CGEventField(rawValue: 126)!
 let swipeVelocityXField = CGEventField(rawValue: 129)!
 let swipeVelocityYField = CGEventField(rawValue: 130)!
 let gesturePhaseField = CGEventField(rawValue: 132)!
-let flagBitsField = CGEventField(rawValue: 135)!
-let zoomDeltaXField = CGEventField(rawValue: 139)!
 
-func postSwipeEvent(phase: Int64, right: Bool, progress: Double, velocity: Double) {
-    guard let dockEvent = CGEvent(source: nil), let gestureEvent = CGEvent(source: nil) else { return }
-    dockEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
-    gestureEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
-    dockEvent.setIntegerValueField(eventTypeField, value: 30)      // DockControl
+// Reverses the posted direction when natural scrolling is off.
+let postedSwipeSign: Double = {
+    let natural = CFPreferencesCopyAppValue(
+        "com.apple.swipescrolldirection" as CFString, kCFPreferencesAnyApplication) as? Bool ?? true
+    return natural ? 1 : -1
+}()
+
+// Rightward carries negative progress, inverted against the pre-27 encoding.
+func directionSign(right: Bool) -> Double { (right ? -1.0 : 1.0) * postedSwipeSign }
+
+extension Array where Element == UInt8 {
+    mutating func appendLE(_ value: UInt16) { Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) } }
+    mutating func appendLE(_ value: UInt32) { Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) } }
+    mutating func appendLE(_ value: UInt64) { Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) } }
+    mutating func appendLE(_ value: Int32) { appendLE(UInt32(bitPattern: value)) }
+}
+
+// Payload values are 16.16 fixed point; anything finer than 1/65536 truncates
+// to zero and loses the sign the direction depends on.
+func fixed1616(_ value: Double) -> Int32 {
+    let scaled = Int32(truncatingIfNeeded: Int64(value * 65536.0))
+    if scaled == 0 && value != 0 { return value > 0 ? 1 : -1 }
+    return scaled
+}
+
+func gesturePayload(for event: CGEvent) -> [UInt8] {
+    let phase = event.getIntegerValueField(gesturePhaseField)
+    let velocityX = event.getDoubleValueField(swipeVelocityXField)
+    let velocityY = event.getDoubleValueField(swipeVelocityYField)
+    let withVelocity = velocityX != 0 || velocityY != 0 || phase == 4
+
+    var bytes = [UInt8]()
+    bytes.appendLE(event.timestamp != 0 ? event.timestamp : mach_absolute_time())
+    bytes.appendLE(UInt64(0))                       // sender_id
+    bytes.appendLE(UInt32(0))                       // options
+    bytes.appendLE(UInt32(0))                       // attribute_length
+    bytes.appendLE(UInt32(withVelocity ? 2 : 1))    // event_count
+
+    bytes.appendLE(UInt32(40))                      // base.size
+    bytes.appendLE(UInt32(23))                      // base.type, fluid touch gesture
+    bytes.appendLE(UInt32(truncatingIfNeeded: phase & 0xFF) << 24)
+    bytes.appendLE(UInt32(0))                       // base.depth + reserved
+    bytes.appendLE(fixed1616(event.getDoubleValueField(swipePositionXField)))
+    bytes.appendLE(fixed1616(event.getDoubleValueField(swipePositionYField)))
+    bytes.appendLE(Int32(0))                        // position_z
+    bytes.appendLE(UInt32(truncatingIfNeeded: event.getIntegerValueField(swipeMaskField)))
+    bytes.appendLE(UInt16(truncatingIfNeeded: event.getIntegerValueField(swipeMotionField)))
+    bytes.appendLE(UInt16(3))                       // gesture_flavor, Dock primary
+    bytes.appendLE(fixed1616(event.getDoubleValueField(swipeProgressField)))
+
+    if withVelocity {
+        bytes.appendLE(UInt32(28))                  // base.size
+        bytes.appendLE(UInt32(9))                   // base.type, velocity
+        bytes.appendLE(UInt32(0))                   // base.options
+        bytes.appendLE(UInt32(1))                   // base.depth = 1 + reserved
+        bytes.appendLE(fixed1616(velocityX))
+        bytes.appendLE(fixed1616(velocityY))
+        bytes.appendLE(Int32(0))                    // velocity_z
+    }
+    return bytes
+}
+
+func augmented(_ event: CGEvent) -> CGEvent? {
+    guard let data = event.data as Data? else { return nil }
+    var bytes = [UInt8](data)
+    guard bytes.starts(with: [0, 0, 0, 2]) else { return nil }
+    let payload = gesturePayload(for: event)
+    bytes.append(UInt8(payload.count >> 8))
+    bytes.append(UInt8(payload.count & 0xFF))
+    bytes.append(UInt8(rawIOHIDPayloadField >> 8))
+    bytes.append(UInt8(rawIOHIDPayloadField & 0xFF))
+    bytes.append(contentsOf: payload)
+    guard let rebuilt = CGEvent(withDataAllocator: nil, data: Data(bytes) as CFData) else { return nil }
+    // The round trip drops eventSourceUserData.
+    rebuilt.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
+    return rebuilt
+}
+
+func postSwipeEvent(phase: Int64, progress: Double, velocity: Double) {
+    guard let dockEvent = CGEvent(source: nil) else { return }
+    dockEvent.setIntegerValueField(cgsEventTypeField, value: 30)   // DockControl
     dockEvent.setIntegerValueField(gestureHIDTypeField, value: 23) // dock swipe
     dockEvent.setIntegerValueField(gesturePhaseField, value: phase)
-    dockEvent.setIntegerValueField(flagBitsField, value: right ? 1 : 0)
     dockEvent.setIntegerValueField(swipeMotionField, value: 1)     // horizontal
-    dockEvent.setDoubleValueField(scrollYField, value: 0)
-    // A zero zoom delta makes the Dock discard the event as a no-op.
-    dockEvent.setDoubleValueField(zoomDeltaXField, value: Double(Float.leastNonzeroMagnitude))
+    dockEvent.setDoubleValueField(swipePositionXField, value: 0.1)
     dockEvent.setDoubleValueField(swipeProgressField, value: progress)
-    dockEvent.setDoubleValueField(swipeVelocityXField, value: velocity)
-    dockEvent.setDoubleValueField(swipeVelocityYField, value: 0)
-    gestureEvent.setIntegerValueField(eventTypeField, value: 29)   // gesture envelope
-    dockEvent.post(tap: .cgSessionEventTap)
-    gestureEvent.post(tap: .cgSessionEventTap)
+    if velocity != 0 { dockEvent.setDoubleValueField(swipeVelocityXField, value: velocity) }
+    guard let augmentedEvent = augmented(dockEvent),
+          let companion = CGEvent(source: nil) else { return }
+    companion.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
+    companion.setIntegerValueField(cgsEventTypeField, value: 29)   // gesture envelope
+    augmentedEvent.post(tap: .cgSessionEventTap)
+    companion.post(tap: .cgSessionEventTap)
 }
 
 // A gradual swipe that ramps up and back down, closed with the cancelled
@@ -282,38 +362,39 @@ func postSwipeEvent(phase: Int64, right: Bool, progress: Double, velocity: Doubl
 // during the changed ramp and only a cancel revokes it. The ramp exists to
 // make the WindowServer render partial-slide frames.
 func rubberBandSwipe(right: Bool, peak: Double) {
-    let sign = right ? 1.0 : -1.0
-    postSwipeEvent(phase: 1, right: right, progress: 0, velocity: 0)
+    let sign = directionSign(right: right)
+    postSwipeEvent(phase: 1, progress: 0, velocity: 0)
     if peak > 0 {
         for fraction in [0.25, 0.5, 0.75, 1.0, 0.6, 0.25] {
             usleep(16000)
-            postSwipeEvent(phase: 2, right: right, progress: sign * peak * fraction, velocity: 0)
+            postSwipeEvent(phase: 2, progress: sign * peak * fraction, velocity: 0)
         }
     }
     usleep(16000)
-    postSwipeEvent(phase: 8, right: right, progress: 0, velocity: 0)  // cancelled
+    postSwipeEvent(phase: 8, progress: 0, velocity: 0)  // cancelled
 }
 
-// The app's own instant snap: began plus ended at full progress and high
-// velocity, no intermediate frames. This is the arrival that leaves purged
+// The app's own instant snap: near-zero progress committed by a fling on the
+// ended phase, no intermediate frames. This is the arrival that leaves purged
 // backings unrendered.
 func instantSwipe(right: Bool) {
-    let sign = right ? 1.0 : -1.0
-    postSwipeEvent(phase: 1, right: right, progress: 0, velocity: 0)
-    postSwipeEvent(phase: 4, right: right, progress: sign * 2.0, velocity: sign * 400)
+    let sign = directionSign(right: right)
+    postSwipeEvent(phase: 1, progress: sign * 1e-4, velocity: 0)
+    postSwipeEvent(phase: 2, progress: sign * 1e-4, velocity: 0)
+    postSwipeEvent(phase: 4, progress: sign * 1e-4, velocity: sign * 9999)
 }
 
 // A committed swipe at moderate progress and velocity, so the Dock runs a
 // normal animated transition instead of the instant snap.
 func animatedSwipe(right: Bool) {
-    let sign = right ? 1.0 : -1.0
-    postSwipeEvent(phase: 1, right: right, progress: 0, velocity: 0)
+    let sign = directionSign(right: right)
+    postSwipeEvent(phase: 1, progress: 0, velocity: 0)
     for step in [0.1, 0.25, 0.4, 0.55] {
         usleep(16000)
-        postSwipeEvent(phase: 2, right: right, progress: sign * step, velocity: 0)
+        postSwipeEvent(phase: 2, progress: sign * step, velocity: 0)
     }
     usleep(16000)
-    postSwipeEvent(phase: 4, right: right, progress: sign * 0.6, velocity: sign * 150)
+    postSwipeEvent(phase: 4, progress: sign * 0.6, velocity: sign * 150)
 }
 
 // MARK: - Mouse-based heals
