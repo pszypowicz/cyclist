@@ -14,7 +14,7 @@ private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMut
 enum WedgeHeals {
     static let names: [String] = [
         "alpha-nudge", "level-nudge", "occlusion-cover", "resolution-nudge",
-        "ax-owner-nudge", "top-edge-dwell",
+        "ax-owner-nudge", "top-edge-dwell", "dock-ramp", "dock-ramp-wide",
     ]
 
     static func describe(_ name: String) -> String {
@@ -31,6 +31,10 @@ enum WedgeHeals {
             return "Nudge the owner's real window through Accessibility to request a group layout."
         case "top-edge-dwell":
             return "Dwell at the target display's top edge for 750 ms, then restore the cursor."
+        case "dock-ramp":
+            return "Ramp a dock swipe ~2pt and cancel, without committing a switch."
+        case "dock-ramp-wide":
+            return "Ramp a dock swipe ~40pt and cancel, without committing a switch."
         default:
             return "Unknown heal."
         }
@@ -64,6 +68,12 @@ enum WedgeHeals {
             case "ax-owner-nudge":
                 axOwnerNudge(ownerPID, companionWindowID: wid, companionBounds: companionBounds, space: space)
             case "top-edge-dwell": topEdgeDwell(companionBounds, windowID: wid, ownerPID: ownerPID, space: space)
+            // The only mechanism with prior evidence of healing the band.
+            // It was dropped from the app because its frames collide with
+            // the next navigation, but on macOS 27 it was never tested: it
+            // went out without the payload and the Dock ignored it.
+            case "dock-ramp": Spaces.postHealRamp(right: false, peakPoints: 2)
+            case "dock-ramp-wide": Spaces.postHealRamp(right: false, peakPoints: 40)
             default: break
             }
         }

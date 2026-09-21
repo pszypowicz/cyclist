@@ -81,6 +81,14 @@ final class SpaceNavigator {
         if let replaced = target, replaced != spaceID {
             Log.debug("navigator: replacing in-flight target \(replaced) with \(spaceID)")
         }
+        // A swipe posted into the middle of a chrome-heal ramp is dropped by
+        // the Dock, which used to swallow whole bursts of quick swipes. The
+        // ramp is closed here, and the settle gap is anchored on that close
+        // so the first post of this navigation stays clear of it.
+        if Spaces.cancelChromeHeal() {
+            Log.debug("navigator: closed an in-flight chrome heal")
+            lastLanded = Date()
+        }
         cancel()
         recency.navigationBegan()
         target = spaceID
@@ -137,6 +145,9 @@ final class SpaceNavigator {
             cancel()
             arrival?()
             AppListProvider.harvestTitles()
+            if info.types[target] != 0 {
+                scheduleChromeHeal(space: target, right: targetIndex == 0)
+            }
             Diagnostics.verifyTransition(space: target)
             return
         }
@@ -163,5 +174,23 @@ final class SpaceNavigator {
         let work = DispatchWorkItem { [weak self] in self?.step() }
         stepWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + interval, execute: work)
+    }
+
+    // Every fullscreen arrival repaints its companion chrome (#63); see
+    // Spaces.postFullscreenChromeHeal for the mechanism. Display sleep
+    // purges the backings of windows on non-visible Spaces, the purge is
+    // invisible to every bookkeeping signal short of capturing pixels, and
+    // the heal itself is imperceptible, so it runs unconditionally rather
+    // than detecting the wedge. Deferred past the arrival because the Dock
+    // drops gestures fired right on a completed transition, and skipped
+    // when the user has already navigated on. A navigation that starts
+    // while the ramp is open closes it (see begin).
+    private func scheduleChromeHeal(space: UInt64, right: Bool) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, self.target == nil,
+                  Spaces.activeDisplayInfo()?.current == space else { return }
+            Log.debug("navigator: fullscreen chrome heal on space \(space)")
+            Spaces.postFullscreenChromeHeal(right: right)
+        }
     }
 }

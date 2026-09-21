@@ -256,6 +256,89 @@ enum Spaces {
         }
     }
 
+    // In-place companion repaint for fullscreen Spaces (#63). After display
+    // sleep the WindowServer purges the backing stores of windows on
+    // non-visible Spaces; the instant snap never re-requests their contents,
+    // so the fullscreen toolbar companion composites as nothing and the
+    // backdrop shows through as a blank band. Ramping a dock swipe ~2pt and
+    // closing with cancelled runs enough of the Dock's transition
+    // choreography that the WindowServer re-requests window contents,
+    // without committing a switch. Cancelled is the only closing phase that
+    // stays put: the Dock latches the commit during the changed ramp, so
+    // ending commits regardless of its own progress.
+    //
+    // Measured by --heal-experiment on macOS 27: a wedged band captures
+    // flat black, and one ramp restores it to the same spread a band drawn
+    // by a real fullscreen transition carries.
+    //
+    // Frames are scheduled rather than slept, to keep the main run loop
+    // free, and the ramp is closed early when a navigation starts. Its
+    // frames reach the Dock like any other gesture, and a swipe posted into
+    // the middle of one is dropped.
+    static func postFullscreenChromeHeal(right: Bool) {
+        let width = CGDisplayBounds(activeDisplayID() ?? CGMainDisplayID()).width
+        let peak = (right ? -1.0 : 1.0) * postedSwipeSign * 2.0 / width
+        healGeneration += 1
+        let generation = healGeneration
+        healInFlight = true
+
+        healFrame(phase: 1, progress: 0)  // began
+        var delay: TimeInterval = 0
+        for fraction in [0.25, 0.5, 0.75, 1.0, 0.6, 0.25] {
+            delay += 0.016
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard healGeneration == generation else { return }
+                healFrame(phase: 2, progress: peak * fraction)  // changed
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.016) {
+            guard healGeneration == generation else { return }
+            healInFlight = false
+            healFrame(phase: 8, progress: 0)  // cancelled
+        }
+    }
+
+    // Closes an in-flight heal at once. Returns whether one was open, so the
+    // caller can pace its own post away from the closing frame.
+    @discardableResult
+    static func cancelChromeHeal() -> Bool {
+        guard healInFlight else { return false }
+        healGeneration += 1
+        healInFlight = false
+        healFrame(phase: 8, progress: 0)  // cancelled
+        return true
+    }
+
+    private static var healGeneration = 0
+    private static var healInFlight = false
+
+    // One ramp frame. Carries no velocity, so nothing commits.
+    private static func healFrame(phase: Int64, progress: Double) {
+        guard let event = CGEvent(source: nil) else { return }
+        event.setIntegerValueField(cgsEventTypeField, value: 30)      // DockControl
+        event.setIntegerValueField(gestureHIDTypeField, value: 23)    // dock swipe
+        event.setIntegerValueField(gesturePhaseField, value: phase)
+        event.setIntegerValueField(swipeMotionField, value: 1)        // horizontal
+        event.setDoubleValueField(swipePositionXField, value: 0.1)
+        event.setDoubleValueField(swipeProgressField, value: progress)
+        guard let augmentedEvent = augmented(event) else { return }
+        postPair(augmentedEvent)
+    }
+
+    // The same ramp driven synchronously, for --heal-experiment: a CLI run
+    // sleeps on the main thread, where scheduled frames would never fire.
+    static func postHealRamp(right: Bool, peakPoints: Double) {
+        let width = CGDisplayBounds(activeDisplayID() ?? CGMainDisplayID()).width
+        let peak = (right ? -1.0 : 1.0) * postedSwipeSign * peakPoints / width
+        healFrame(phase: 1, progress: 0)
+        for fraction in [0.25, 0.5, 0.75, 1.0, 0.6, 0.25] {
+            usleep(16000)
+            healFrame(phase: 2, progress: peak * fraction)
+        }
+        usleep(16000)
+        healFrame(phase: 8, progress: 0)
+    }
+
     // The Dock reads a dock swipe from a serialized IOHID queue payload the
     // event carries in field 4205, not from the CGEvent fields the public
     // setters reach. An event describing the gesture only in those fields is
