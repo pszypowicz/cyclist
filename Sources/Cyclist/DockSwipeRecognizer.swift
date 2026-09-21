@@ -12,16 +12,17 @@ import Foundation
 // is already up when it starts: a swipe inside Mission Control scrubs the
 // overlay's view, and that meaning belongs to the Dock.
 //
-// Reads the same undocumented gesture-event encoding that
-// Spaces.postDockSwipeGesture writes: a dock-swipe payload carries
-// IOHIDEventType 23 in field 110, motion axis in field 123 (1 =
-// horizontal), cumulative progress in field 124 (screen-widths, positive
-// toward the Space on the right), X velocity in field 129, and the
-// IOHIDEventPhase in field 132 (mayBegin=128, began=1, changed=2,
-// ended=4, cancelled=8). Cyclist's own synthetic swipes carry
-// Spaces.syntheticGestureTag in the event-source user data and are not
-// touched: they must reach the Dock for SpaceNavigator to work, and
-// treating them as real would navigate in a loop.
+// Reads the undocumented encoding the WindowServer emits for a real
+// trackpad gesture. The posting side writes its own shape (see
+// Spaces.postDockSwipeGesture), so the two are described separately: a
+// native dock-swipe carries IOHIDEventType 23 in field 110, motion axis
+// in field 123 (1 = horizontal), cumulative progress in field 124
+// (screen-widths, positive toward the Space on the right), X velocity in
+// field 129, and the IOHIDEventPhase in field 132 (mayBegin=128,
+// began=1, changed=2, ended=4, cancelled=8). Cyclist's own synthetic
+// swipes carry Spaces.syntheticGestureTag in the event-source user data
+// and are not touched: they must reach the Dock for SpaceNavigator to
+// work, and treating them as real would navigate in a loop.
 final class DockSwipeRecognizer {
     // A step fires the moment cumulative progress commits past this, not
     // at gesture end, so the response feels immediate. A short flick ends
