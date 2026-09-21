@@ -1,36 +1,26 @@
 #!/usr/bin/env swift
 import AppKit
 
-// Compares synthetic dock-swipe gesture shapes as SpaceNavigator candidates:
-// the app's current two-phase pair, the same pair with a Changed phase
-// inserted, and InstantSpaceSwitcher's three-phase encoding. Every post is
-// single-shot - no retry - and arrival is verified by polling the
-// WindowServer's Space bookkeeping, so round-trip runs measure exactly the
-// drop rate the app's retry loop exists to cover. The probe also reports
-// whether Mission Control or App Exposé is showing, using ISS's Dock
+// Measures the synthetic dock-swipe gesture the app posts (Spaces.swift):
+// how often the Dock acts on it and how long each switch takes to land.
+// Every post is single-shot - no retry - and arrival is verified by polling
+// the WindowServer's Space bookkeeping, so round-trip runs measure exactly
+// the drop rate SpaceNavigator's "gave up" line reports. The probe also
+// reports whether Mission Control or App Exposé is showing, using ISS's Dock
 // window-list heuristic (layer-18/20 counts), so posting into an open
 // Mission Control can be correlated with what the Dock did about it.
+//
+// Re-run this after a macOS update: the gesture encoding is undocumented and
+// has broken across major versions before.
 
 func usage() {
     print("""
-    Compare synthetic dock-swipe gesture shapes (single-shot, no retry).
+    Measure the synthetic dock-swipe gesture (single-shot, no retry).
 
-    Usage: swift scripts/gesture-shape-experiment.swift --variant <name> --direction <left|right> [flags]
+    Usage: swift scripts/gesture-shape-experiment.swift --direction <left|right> [flags]
            swift scripts/gesture-shape-experiment.swift --probe
 
-    Variants:
-      cyclist2  The app's current shape: Began + Ended, progress +-2.0 and
-                velocity +-400 x steps on Ended only, gesture-envelope event
-                after each dock event, direction also in the flag-bits field.
-      cyclist3  cyclist2 with a Changed phase between Began and Ended,
-                carrying the same progress/velocity as Ended.
-      iss       InstantSpaceSwitcher's shape: Began + Changed + Ended, one
-                dock event per phase (no envelope), no flag-bits direction,
-                progress +-FLT_TRUE_MIN and velocity +-2000 x steps on every
-                phase, velocity mirrored onto the Y field.
-
     Flags:
-      --variant <name>      Gesture shape to post (required unless --probe)
       --direction <l|r>     Swipe direction of the first leg (required unless --probe)
       --steps <n>           Spaces to cross per leg (default: 1)
       --round-trips <n>     Legs there and back, alternating direction; 0
@@ -55,8 +45,6 @@ func fail(_ message: String) -> Never {
 
 // MARK: - Flags
 
-let variantNames = ["cyclist2", "cyclist3", "iss"]
-var variant: String?
 var direction: String?
 var steps = 1
 var roundTrips = 0
@@ -73,12 +61,6 @@ while !arguments.isEmpty {
         return arguments.removeFirst()
     }
     switch flag {
-    case "--variant":
-        let name = value()
-        guard variantNames.contains(name) else {
-            fail("Unknown variant \"\(name)\"; one of: \(variantNames.joined(separator: ", "))")
-        }
-        variant = name
     case "--direction":
         let name = value()
         guard ["left", "right"].contains(name) else { fail("--direction wants left or right") }
@@ -103,10 +85,7 @@ while !arguments.isEmpty {
     default: fail("Unknown flag: \(flag) (see --help)")
     }
 }
-if !probeOnly {
-    guard variant != nil else { usage(); fail("\n--variant is required") }
-    guard direction != nil else { usage(); fail("\n--direction is required") }
-}
+if !probeOnly, direction == nil { usage(); fail("\n--direction is required") }
 
 // MARK: - Space state
 
@@ -156,80 +135,130 @@ func printProbe(_ prefix: String) {
 
 // MARK: - Gesture posting
 
+// Mirrors Spaces.postDockSwipeGesture. The Dock reads the gesture from a
+// serialized IOHID queue payload in field 4205, not from the CGEvent fields
+// the public setters reach, so the event is round-tripped through its
+// serialized form to carry it. Each dock event needs a companion gesture
+// event, and the commit comes from the fling velocity on the Ended phase.
 let syntheticGestureTag: Int64 = 0x4359434C  // "CYCL", so a running Cyclist passes these through
-let eventTypeField = CGEventField(rawValue: 55)!
-let gestureHIDTypeField = CGEventField(rawValue: 110)!
-let scrollYField = CGEventField(rawValue: 119)!
-let swipeMotionField = CGEventField(rawValue: 123)!
-let swipeProgressField = CGEventField(rawValue: 124)!
-let swipeVelocityXField = CGEventField(rawValue: 129)!
-let swipeVelocityYField = CGEventField(rawValue: 130)!
-let gesturePhaseField = CGEventField(rawValue: 132)!
-let flagBitsField = CGEventField(rawValue: 135)!
-let zoomDeltaXField = CGEventField(rawValue: 139)!
+let rawIOHIDPayloadField = 4205
 
-// One dock event in the app's field encoding, plus the gesture-envelope
-// event Spaces.postDockSwipePair sends after it.
-func postCyclistPhase(_ phase: Int64, right: Bool, progress: Double, velocity: Double) {
-    guard let dockEvent = CGEvent(source: nil), let gestureEvent = CGEvent(source: nil) else { return }
-    dockEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
-    gestureEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
-    dockEvent.setIntegerValueField(eventTypeField, value: 30)      // DockControl
-    dockEvent.setIntegerValueField(gestureHIDTypeField, value: 23) // dock swipe
-    dockEvent.setIntegerValueField(gesturePhaseField, value: phase)
-    dockEvent.setIntegerValueField(flagBitsField, value: right ? 1 : 0)
-    dockEvent.setIntegerValueField(swipeMotionField, value: 1)     // horizontal
-    dockEvent.setDoubleValueField(scrollYField, value: 0)
-    // A zero zoom delta makes the Dock discard the event as a no-op.
-    dockEvent.setDoubleValueField(zoomDeltaXField, value: Double(Float.leastNonzeroMagnitude))
-    dockEvent.setDoubleValueField(swipeProgressField, value: progress)
-    dockEvent.setDoubleValueField(swipeVelocityXField, value: velocity)
-    dockEvent.setDoubleValueField(swipeVelocityYField, value: 0)
-    gestureEvent.setIntegerValueField(eventTypeField, value: 29)   // gesture envelope
-    dockEvent.post(tap: .cgSessionEventTap)
-    gestureEvent.post(tap: .cgSessionEventTap)
+func field(_ raw: UInt32) -> CGEventField { CGEventField(rawValue: raw)! }
+let cgsEventTypeField = field(55)
+let gestureHIDTypeField = field(110)
+let swipeMaskField = field(115)
+let swipeMotionField = field(123)
+let swipeProgressField = field(124)
+let swipePositionXField = field(125)
+let swipePositionYField = field(126)
+let swipeVelocityXField = field(129)
+let swipeVelocityYField = field(130)
+let gesturePhaseField = field(132)
+
+// Reverses the posted direction when natural scrolling is off.
+let postedSwipeSign: Double = {
+    let natural = CFPreferencesCopyAppValue(
+        "com.apple.swipescrolldirection" as CFString, kCFPreferencesAnyApplication) as? Bool ?? true
+    return natural ? 1 : -1
+}()
+
+extension Array where Element == UInt8 {
+    mutating func appendLE(_ value: UInt16) { Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) } }
+    mutating func appendLE(_ value: UInt32) { Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) } }
+    mutating func appendLE(_ value: UInt64) { Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) } }
+    mutating func appendLE(_ value: Int32) { appendLE(UInt32(bitPattern: value)) }
 }
 
-// One dock event in ISS's field encoding: no envelope, no flag bits, no
-// scroll/zoom fields, progress and velocity set on every phase, velocity
-// mirrored onto Y (iss_post_dock_swipe in ISS.c).
-func postISSPhase(_ phase: Int64, right: Bool, velocity: Double) {
-    guard let dockEvent = CGEvent(source: nil) else { return }
-    let sign = right ? 1.0 : -1.0
-    dockEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
-    dockEvent.setIntegerValueField(eventTypeField, value: 30)
-    dockEvent.setIntegerValueField(gestureHIDTypeField, value: 23)
-    dockEvent.setIntegerValueField(gesturePhaseField, value: phase)
-    dockEvent.setDoubleValueField(swipeProgressField, value: sign * Double(Float.leastNonzeroMagnitude))
-    dockEvent.setIntegerValueField(swipeMotionField, value: 1)
-    dockEvent.setDoubleValueField(swipeVelocityXField, value: sign * velocity)
-    dockEvent.setDoubleValueField(swipeVelocityYField, value: sign * velocity)
-    dockEvent.post(tap: .cgSessionEventTap)
+// Values in the payload are 16.16 fixed point; anything finer than 1/65536
+// truncates to zero and loses the sign the direction depends on.
+func fixed1616(_ value: Double) -> Int32 {
+    let scaled = Int32(truncatingIfNeeded: Int64(value * 65536.0))
+    if scaled == 0 && value != 0 { return value > 0 ? 1 : -1 }
+    return scaled
 }
 
-func postGesture(variant: String, right: Bool, steps: Int) {
-    let count = max(1, steps)
-    switch variant {
-    case "cyclist2", "cyclist3":
-        let sign = right ? 1.0 : -1.0
-        let progress = sign * 2.0
-        let velocity = sign * 400.0 * Double(count)
-        for _ in 0..<count {
-            postCyclistPhase(1, right: right, progress: 0, velocity: 0)          // began
-            if variant == "cyclist3" {
-                postCyclistPhase(2, right: right, progress: progress, velocity: velocity)  // changed
-            }
-            postCyclistPhase(4, right: right, progress: progress, velocity: velocity)      // ended
-        }
-    case "iss":
-        let velocity = 2000.0 * Double(count)
-        for _ in 0..<count {
-            postISSPhase(1, right: right, velocity: velocity)  // began
-            postISSPhase(2, right: right, velocity: velocity)  // changed
-            postISSPhase(4, right: right, velocity: velocity)  // ended
-        }
-    default:
-        fail("unreachable")
+func gesturePayload(for event: CGEvent) -> [UInt8] {
+    let phase = event.getIntegerValueField(gesturePhaseField)
+    let velocityX = event.getDoubleValueField(swipeVelocityXField)
+    let velocityY = event.getDoubleValueField(swipeVelocityYField)
+    let withVelocity = velocityX != 0 || velocityY != 0 || phase == 4
+
+    var bytes = [UInt8]()
+    bytes.appendLE(event.timestamp != 0 ? event.timestamp : mach_absolute_time())
+    bytes.appendLE(UInt64(0))                       // sender_id
+    bytes.appendLE(UInt32(0))                       // options
+    bytes.appendLE(UInt32(0))                       // attribute_length
+    bytes.appendLE(UInt32(withVelocity ? 2 : 1))    // event_count
+
+    bytes.appendLE(UInt32(40))                      // base.size
+    bytes.appendLE(UInt32(23))                      // base.type, fluid touch gesture
+    bytes.appendLE(UInt32(truncatingIfNeeded: phase & 0xFF) << 24)
+    bytes.appendLE(UInt32(0))                       // base.depth + reserved
+    bytes.appendLE(fixed1616(event.getDoubleValueField(swipePositionXField)))
+    bytes.appendLE(fixed1616(event.getDoubleValueField(swipePositionYField)))
+    bytes.appendLE(Int32(0))                        // position_z
+    bytes.appendLE(UInt32(truncatingIfNeeded: event.getIntegerValueField(swipeMaskField)))
+    bytes.appendLE(UInt16(truncatingIfNeeded: event.getIntegerValueField(swipeMotionField)))
+    bytes.appendLE(UInt16(3))                       // gesture_flavor, Dock primary
+    bytes.appendLE(fixed1616(event.getDoubleValueField(swipeProgressField)))
+
+    if withVelocity {
+        bytes.appendLE(UInt32(28))                  // base.size
+        bytes.appendLE(UInt32(9))                   // base.type, velocity
+        bytes.appendLE(UInt32(0))                   // base.options
+        bytes.appendLE(UInt32(1))                   // base.depth = 1 + reserved
+        bytes.appendLE(fixed1616(velocityX))
+        bytes.appendLE(fixed1616(velocityY))
+        bytes.appendLE(Int32(0))                    // velocity_z
+    }
+    return bytes
+}
+
+func augmented(_ event: CGEvent) -> CGEvent? {
+    guard let data = event.data as Data? else { return nil }
+    var bytes = [UInt8](data)
+    guard bytes.starts(with: [0, 0, 0, 2]) else { return nil }
+    let payload = gesturePayload(for: event)
+    bytes.append(UInt8(payload.count >> 8))
+    bytes.append(UInt8(payload.count & 0xFF))
+    bytes.append(UInt8(rawIOHIDPayloadField >> 8))
+    bytes.append(UInt8(rawIOHIDPayloadField & 0xFF))
+    bytes.append(contentsOf: payload)
+    guard let rebuilt = CGEvent(withDataAllocator: nil, data: Data(bytes) as CFData) else { return nil }
+    // The round trip drops eventSourceUserData.
+    rebuilt.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
+    return rebuilt
+}
+
+func makeDockEvent(phase: Int64, right: Bool) -> CGEvent? {
+    guard let event = CGEvent(source: nil) else { return nil }
+    event.setIntegerValueField(cgsEventTypeField, value: 30)      // DockControl
+    event.setIntegerValueField(gestureHIDTypeField, value: 23)    // dock swipe
+    event.setIntegerValueField(gesturePhaseField, value: phase)
+    event.setIntegerValueField(swipeMotionField, value: 1)        // horizontal
+    event.setDoubleValueField(swipePositionXField, value: 0.1)
+    event.setDoubleValueField(swipeProgressField,
+                              value: (right ? -1e-4 : 1e-4) * postedSwipeSign)
+    if phase == 4 {
+        event.setDoubleValueField(swipeVelocityXField,
+                                  value: (right ? -9999.0 : 9999.0) * postedSwipeSign)
+    }
+    return event
+}
+
+func postPair(_ dockEvent: CGEvent) {
+    guard let companion = CGEvent(source: nil) else { return }
+    companion.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
+    companion.setIntegerValueField(cgsEventTypeField, value: 29)  // gesture envelope
+    dockEvent.post(tap: .cgSessionEventTap)
+    companion.post(tap: .cgSessionEventTap)
+}
+
+func postGesture(right: Bool, steps: Int) {
+    for _ in 0..<max(1, steps) {
+        let events = [Int64(1), 2, 4].compactMap { makeDockEvent(phase: $0, right: right).flatMap(augmented) }
+        guard events.count == 3 else { return }
+        events.forEach(postPair)
     }
 }
 
@@ -269,7 +298,7 @@ func viableDirection(preferRight: Bool, steps: Int) -> Bool {
 
 // One posted gesture with verified arrival. Returns the latency, nil for a
 // drop; fails hard when the requested distance leaves the Space order.
-func runLeg(_ index: Int, variant: String, right: Bool, steps: Int) -> Int? {
+func runLeg(_ index: Int, right: Bool, steps: Int) -> Int? {
     guard let state = spaceState(),
           let currentIndex = state.order.firstIndex(of: state.current) else {
         fail("Cannot read Space state")
@@ -279,7 +308,7 @@ func runLeg(_ index: Int, variant: String, right: Bool, steps: Int) -> Int? {
         fail("Leg \(index): \(right ? "right" : "left") x\(steps) leaves the Space order \(state.order) from index \(currentIndex)")
     }
     let target = state.order[targetIndex]
-    postGesture(variant: variant, right: right, steps: steps)
+    postGesture(right: right, steps: steps)
     let latency = pollArrival(target: target, timeoutMs: timeoutMs)
     let verdict = latency.map { "LANDED \($0)ms" } ?? "DROPPED (still \(spaceState()?.current ?? 0))"
     print("leg \(index) \(right ? "right" : "left"): \(state.current) -> \(target) \(verdict)")
@@ -303,10 +332,10 @@ let firstRight = direction == "right"
 printProbe("before: ")
 
 if roundTrips == 0 {
-    let latency = runLeg(1, variant: variant!, right: firstRight, steps: steps)
+    let latency = runLeg(1, right: firstRight, steps: steps)
     Thread.sleep(forTimeInterval: 0.5)
     printProbe("after:  ")
-    print("RESULT: \(variant!) one-way \(latency != nil ? "LANDED" : "DROPPED")")
+    print("RESULT: one-way \(latency != nil ? "LANDED" : "DROPPED")")
     exit(latency != nil ? 0 : 1)
 }
 
@@ -315,7 +344,7 @@ var drops = 0
 for leg in 1...(roundTrips * 2) {
     let preferRight = leg % 2 == 1 ? firstRight : !firstRight
     let right = viableDirection(preferRight: preferRight, steps: steps)
-    if let latency = runLeg(leg, variant: variant!, right: right, steps: steps) {
+    if let latency = runLeg(leg, right: right, steps: steps) {
         latencies.append(latency)
         usleep(UInt32(gapMs * 1000))
     } else {
@@ -325,9 +354,9 @@ for leg in 1...(roundTrips * 2) {
 printProbe("after:  ")
 let total = roundTrips * 2
 if latencies.isEmpty {
-    print("RESULT: \(variant!) \(drops)/\(total) dropped, none landed")
+    print("RESULT: \(drops)/\(total) dropped, none landed")
     exit(1)
 }
 let sorted = latencies.sorted()
-print("RESULT: \(variant!) landed \(latencies.count)/\(total), dropped \(drops),"
+print("RESULT: landed \(latencies.count)/\(total), dropped \(drops),"
     + " latency ms min/med/max \(sorted.first!)/\(sorted[sorted.count / 2])/\(sorted.last!)")

@@ -245,125 +245,173 @@ enum Spaces {
     // navigate in a loop.
     static let syntheticGestureTag: Int64 = 0x4359434C  // "CYCL"
 
-    // Instant Space switch: synthetic trackpad dock-swipe gestures with
-    // high velocity, so the Dock switches with no animation (~40ms
-    // observed). One three-phase gesture per step, with velocity scaled
-    // by the step count.
+    // Instant Space switch: synthetic trackpad dock-swipe gestures that
+    // commit on a fling, so the Dock switches with no animation (~40ms
+    // observed). One three-phase gesture per step; each gesture moves
+    // exactly one Space, so distance comes from the count, not from the
+    // magnitude of any one gesture.
     static func postDockSwipes(right: Bool, steps: Int) {
-        let count = max(1, steps)
-        let velocity = (right ? 2000.0 : -2000.0) * Double(count)
-        for _ in 0..<count {
-            postDockSwipeGesture(right: right, velocity: velocity)
+        for _ in 0..<max(1, steps) {
+            postDockSwipeGesture(right: right)
         }
     }
 
-    // In-place companion repaint for fullscreen Spaces (#63). After display
-    // sleep the WindowServer purges the backing stores of windows on
-    // non-visible Spaces; the instant snap never re-requests their contents,
-    // so the fullscreen toolbar companion composites as nothing (it exposes
-    // no AX element the repaint nudge could move, and unlike WebKit content
-    // the AppKit chrome never repopulates itself). Ramping a dock swipe to
-    // ~2pt of slide and cancelling runs enough of the Dock's transition
-    // choreography that the WindowServer re-requests window contents,
-    // without committing a switch. Measured on macOS 26.6: a bare
-    // began/cancelled pair with no changed frames does not heal, ~2pt is
-    // the floor with margin, and closing with the ended phase always
-    // commits a switch regardless of its progress (the Dock latches the
-    // commit during the changed ramp), so cancelled is the only closing
-    // phase that stays put. Frames are scheduled, not slept, to keep the
-    // main run loop free.
-    static func postFullscreenChromeHeal(right: Bool) {
-        let width = CGDisplayBounds(activeDisplayID() ?? CGMainDisplayID()).width
-        let sign = right ? 1.0 : -1.0
-        let peak = sign * 2.0 / width
-        postHealFrame(phase: 1, right: right, progress: 0)
-        var delay: TimeInterval = 0
-        for fraction in [0.25, 0.5, 0.75, 1.0, 0.6, 0.25] {
-            delay += 0.016
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                postHealFrame(phase: 2, right: right, progress: peak * fraction)
-            }
+    // The Dock reads a dock swipe from a serialized IOHID queue payload the
+    // event carries in field 4205, not from the CGEvent fields the public
+    // setters reach. An event describing the gesture only in those fields is
+    // accepted by CGEventPost and then silently ignored. The payload is
+    // written by round-tripping the event through CGEventCreateData /
+    // CGEventCreateFromData and appending the field by hand. Every dock
+    // event must also be followed by a companion gesture event (CGS type
+    // 29); the pair is what the Dock acts on.
+    //
+    // Direction is inverted against the pre-27 encoding: rightward now
+    // carries negative progress. The commit comes from the fling velocity on
+    // the Ended phase, so progress stays near zero and nothing is left to
+    // animate. Full-magnitude progress switches correctly but slides
+    // visibly, which defeats the point.
+    //
+    // Layout and values follow mmathys/noswoosh and mgbowen/FasterSwiper.
+    private static func postDockSwipeGesture(right: Bool) {
+        // Build all three phases before posting any: a partial began/changed
+        // sequence leaves the Dock mid-gesture on a blank Space.
+        let phases: [Int64] = [1, 2, 4]  // began, changed, ended
+        let events = phases.compactMap { phase -> CGEvent? in
+            makeDockEvent(phase: phase, right: right).flatMap(augmented)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.016) {
-            postHealFrame(phase: 8, right: right, progress: 0)  // cancelled
-        }
+        guard events.count == phases.count else { return }
+        events.forEach(postPair)
     }
 
-    // One heal frame; unlike postDockSwipePair the progress and velocity
-    // fields are set on every phase, matching the validated gesture shape.
-    private static func postHealFrame(phase: Int64, right: Bool, progress: Double) {
-        let eventTypeField = CGEventField(rawValue: 55)!
-        let gestureHIDTypeField = CGEventField(rawValue: 110)!
-        let scrollYField = CGEventField(rawValue: 119)!
-        let swipeMotionField = CGEventField(rawValue: 123)!
-        let swipeProgressField = CGEventField(rawValue: 124)!
-        let swipeVelocityXField = CGEventField(rawValue: 129)!
-        let swipeVelocityYField = CGEventField(rawValue: 130)!
-        let gesturePhaseField = CGEventField(rawValue: 132)!
-        let flagBitsField = CGEventField(rawValue: 135)!
-        let zoomDeltaXField = CGEventField(rawValue: 139)!
+    // Reverses the posted direction when natural scrolling is off. The
+    // reading side (DockSwipeRecognizer) needs no such correction: it maps
+    // either reported sign onto the right chain step already.
+    private static let postedSwipeSign: Double = {
+        let natural = CFPreferencesCopyAppValue(
+            "com.apple.swipescrolldirection" as CFString, kCFPreferencesAnyApplication) as? Bool ?? true
+        return natural ? 1 : -1
+    }()
 
-        guard let dockEvent = CGEvent(source: nil),
-              let gestureEvent = CGEvent(source: nil) else { return }
-        dockEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
-        gestureEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
-        dockEvent.setIntegerValueField(eventTypeField, value: 30)      // DockControl
-        dockEvent.setIntegerValueField(gestureHIDTypeField, value: 23) // dock swipe
-        dockEvent.setIntegerValueField(gesturePhaseField, value: phase)
-        dockEvent.setIntegerValueField(flagBitsField, value: right ? 1 : 0)
-        dockEvent.setIntegerValueField(swipeMotionField, value: 1)     // horizontal
-        dockEvent.setDoubleValueField(scrollYField, value: 0)
-        // A zero zoom delta makes the Dock discard the event as a no-op.
-        dockEvent.setDoubleValueField(zoomDeltaXField, value: Double(Float.leastNonzeroMagnitude))
-        dockEvent.setDoubleValueField(swipeProgressField, value: progress)
-        dockEvent.setDoubleValueField(swipeVelocityXField, value: 0)
-        dockEvent.setDoubleValueField(swipeVelocityYField, value: 0)
-        gestureEvent.setIntegerValueField(eventTypeField, value: 29)   // gesture envelope
+    private static func makeDockEvent(phase: Int64, right: Bool) -> CGEvent? {
+        guard let event = CGEvent(source: nil) else { return nil }
+        event.setIntegerValueField(cgsEventTypeField, value: 30)      // DockControl
+        event.setIntegerValueField(gestureHIDTypeField, value: 23)    // dock swipe
+        event.setIntegerValueField(gesturePhaseField, value: phase)
+        event.setIntegerValueField(swipeMotionField, value: 1)        // horizontal
+        event.setDoubleValueField(swipePositionXField, value: 0.1)
+        // Neither FLT_TRUE_MIN (flushes to zero on Apple Silicon, losing the
+        // sign) nor 0 (fixed1616 would serialize it as 0): only the sign of
+        // this value picks the direction.
+        event.setDoubleValueField(swipeProgressField,
+                                  value: (right ? -1e-4 : 1e-4) * postedSwipeSign)
+        if phase == 4 {
+            event.setDoubleValueField(swipeVelocityXField,
+                                      value: (right ? -9999.0 : 9999.0) * postedSwipeSign)
+        }
+        return event
+    }
+
+    // A dock event alone does nothing; the Dock acts on the pair.
+    private static func postPair(_ dockEvent: CGEvent) {
+        guard let companion = CGEvent(source: nil) else { return }
+        companion.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
+        companion.setIntegerValueField(cgsEventTypeField, value: 29)  // gesture envelope
         dockEvent.post(tap: .cgSessionEventTap)
-        gestureEvent.post(tap: .cgSessionEventTap)
+        companion.post(tap: .cgSessionEventTap)
     }
 
-    // Undocumented CGEvent field indices posted through the public
-    // CGEventPost; the exact encoding follows InstantSpaceSwitcher
-    // (github.com/jurplel/InstantSpaceSwitcher): one dock event per phase -
-    // Began, Changed, Ended - no gesture envelope, direction carried only
-    // by the sign of progress and velocity, progress at +-FLT_TRUE_MIN and
-    // the velocity mirrored onto both axis fields in every phase. The
-    // Changed phase is the part Mission Control requires: without it the
-    // Dock ignores the gesture outright while Mission Control or App
-    // Exposé is open, with it the same gesture moves the shown Space and
-    // the overlay stays up, matching a real trackpad swipe. The progress
-    // epsilon matters just as much: a full-magnitude progress on Changed
-    // makes the Dock run its ~1.2s animated transition instead of the
-    // instant snap. Measured with scripts/gesture-shape-experiment.swift
-    // on macOS 26; re-measure after macOS updates.
-    private static func postDockSwipeGesture(right: Bool, velocity: Double) {
-        let eventTypeField = CGEventField(rawValue: 55)!       // real CGS event type
-        let gestureHIDTypeField = CGEventField(rawValue: 110)! // IOHIDEventType
-        let swipeMotionField = CGEventField(rawValue: 123)!
-        let swipeProgressField = CGEventField(rawValue: 124)!
-        let swipeVelocityXField = CGEventField(rawValue: 129)!
-        let swipeVelocityYField = CGEventField(rawValue: 130)!
-        let gesturePhaseField = CGEventField(rawValue: 132)!
+    // Serialized CGEvents are a 4-byte version header followed by tagged
+    // fields, so the payload is appended as one more field entry: a 16-bit
+    // byte length, a 16-bit field id, then the bytes.
+    private static func augmented(_ event: CGEvent) -> CGEvent? {
+        guard let data = event.data as Data? else { return nil }
+        var bytes = [UInt8](data)
+        guard bytes.starts(with: [0, 0, 0, 2]) else { return nil }
+        let payload = gesturePayload(for: event)
+        bytes.append(UInt8(payload.count >> 8))
+        bytes.append(UInt8(payload.count & 0xFF))
+        bytes.append(UInt8(rawIOHIDPayloadField >> 8))
+        bytes.append(UInt8(rawIOHIDPayloadField & 0xFF))
+        bytes.append(contentsOf: payload)
+        guard let rebuilt = CGEvent(withDataAllocator: nil, data: Data(bytes) as CFData) else { return nil }
+        // The round trip drops eventSourceUserData, so the tag has to go on
+        // again here. Without it DockSwipeRecognizer reads Cyclist's own
+        // posted gesture as a user swipe and navigates straight back.
+        rebuilt.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
+        return rebuilt
+    }
 
-        let sign = right ? 1.0 : -1.0
+    // Values in the payload are 16.16 fixed point, so the smallest non-zero
+    // magnitude is 1/65536. Anything finer truncates to zero and loses the
+    // sign the direction depends on, so clamp it to one unit instead.
+    private static func fixed1616(_ value: Double) -> Int32 {
+        let scaled = Int32(truncatingIfNeeded: Int64(value * 65536.0))
+        if scaled == 0 && value != 0 { return value > 0 ? 1 : -1 }
+        return scaled
+    }
 
-        func post(phase: Int64) {
-            guard let dockEvent = CGEvent(source: nil) else { return }
-            dockEvent.setIntegerValueField(.eventSourceUserData, value: syntheticGestureTag)
-            dockEvent.setIntegerValueField(eventTypeField, value: 30)      // DockControl
-            dockEvent.setIntegerValueField(gestureHIDTypeField, value: 23) // dock swipe
-            dockEvent.setIntegerValueField(gesturePhaseField, value: phase)
-            dockEvent.setIntegerValueField(swipeMotionField, value: 1)     // horizontal
-            dockEvent.setDoubleValueField(swipeProgressField, value: sign * Double(Float.leastNonzeroMagnitude))
-            dockEvent.setDoubleValueField(swipeVelocityXField, value: velocity)
-            dockEvent.setDoubleValueField(swipeVelocityYField, value: velocity)
-            dockEvent.post(tap: .cgSessionEventTap)
+    // IOHIDSystemQueueElement (28 bytes) + IOHIDFluidTouchGestureData (40
+    // bytes), plus IOHIDVelocityEventData (28 bytes) when the gesture
+    // carries velocity. Little-endian, unlike the big-endian CGEvent
+    // wrapper. Dropping the velocity record on the Ended phase stops the
+    // switch even when the velocities are zero.
+    private static func gesturePayload(for event: CGEvent) -> [UInt8] {
+        let phase = event.getIntegerValueField(gesturePhaseField)
+        let velocityX = event.getDoubleValueField(swipeVelocityXField)
+        let velocityY = event.getDoubleValueField(swipeVelocityYField)
+        let withVelocity = velocityX != 0 || velocityY != 0 || phase == 4
+
+        var bytes = [UInt8]()
+        bytes.appendLE(event.timestamp != 0 ? event.timestamp : mach_absolute_time())
+        bytes.appendLE(UInt64(0))                       // sender_id
+        bytes.appendLE(UInt32(0))                       // options
+        bytes.appendLE(UInt32(0))                       // attribute_length
+        bytes.appendLE(UInt32(withVelocity ? 2 : 1))    // event_count
+
+        bytes.appendLE(UInt32(40))                      // base.size
+        bytes.appendLE(UInt32(23))                      // base.type, fluid touch gesture
+        // The phase rides in the high byte of the options word.
+        bytes.appendLE(UInt32(truncatingIfNeeded: phase & 0xFF) << 24)
+        bytes.appendLE(UInt32(0))                       // base.depth + reserved
+        bytes.appendLE(fixed1616(event.getDoubleValueField(swipePositionXField)))
+        bytes.appendLE(fixed1616(event.getDoubleValueField(swipePositionYField)))
+        bytes.appendLE(Int32(0))                        // position_z
+        bytes.appendLE(UInt32(truncatingIfNeeded: event.getIntegerValueField(swipeMaskField)))
+        bytes.appendLE(UInt16(truncatingIfNeeded: event.getIntegerValueField(swipeMotionField)))
+        bytes.appendLE(UInt16(3))                       // gesture_flavor, Dock primary
+        bytes.appendLE(fixed1616(event.getDoubleValueField(swipeProgressField)))
+
+        if withVelocity {
+            bytes.appendLE(UInt32(28))                  // base.size
+            bytes.appendLE(UInt32(9))                   // base.type, velocity
+            bytes.appendLE(UInt32(0))                   // base.options
+            bytes.appendLE(UInt32(1))                   // base.depth = 1 + reserved
+            bytes.appendLE(fixed1616(velocityX))
+            bytes.appendLE(fixed1616(velocityY))
+            bytes.appendLE(Int32(0))                    // velocity_z
         }
-
-        post(phase: 1)  // began
-        post(phase: 2)  // changed
-        post(phase: 4)  // ended
+        return bytes
     }
 
+}
+
+// Undocumented CGEvent field indices. The gesture encoding is not in any
+// header, so they are addressed by raw index.
+private let cgsEventTypeField = CGEventField(rawValue: 55)!
+private let gestureHIDTypeField = CGEventField(rawValue: 110)!
+private let swipeMaskField = CGEventField(rawValue: 115)!
+private let swipeMotionField = CGEventField(rawValue: 123)!
+private let swipeProgressField = CGEventField(rawValue: 124)!
+private let swipePositionXField = CGEventField(rawValue: 125)!
+private let swipePositionYField = CGEventField(rawValue: 126)!
+private let swipeVelocityXField = CGEventField(rawValue: 129)!
+private let swipeVelocityYField = CGEventField(rawValue: 130)!
+private let gesturePhaseField = CGEventField(rawValue: 132)!
+private let rawIOHIDPayloadField = 4205
+
+private extension Array where Element == UInt8 {
+    mutating func appendLE(_ value: UInt16) { Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) } }
+    mutating func appendLE(_ value: UInt32) { Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) } }
+    mutating func appendLE(_ value: UInt64) { Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) } }
+    mutating func appendLE(_ value: Int32) { appendLE(UInt32(bitPattern: value)) }
 }

@@ -3,8 +3,8 @@ import Foundation
 // Jumps to a target Space with synthetic dock-swipe gestures (~40ms, no
 // animation, any distance, fullscreen Spaces included), verifying arrival
 // shortly after firing: the work chained on arrival (window focus, the
-// AeroSpace two-hop's workspace switch, the chrome heal) must only run
-// once the Space change is real. Posting is single-shot - the three-phase
+// AeroSpace two-hop's workspace switch) must only run once the Space
+// change is real. Posting is single-shot - the three-phase
 // gesture shape (Spaces.postDockSwipes) measures drop-free even at zero
 // settle gap (scripts/gesture-shape-experiment.swift), so a navigation
 // that never lands logs "gave up" as the signal to re-evaluate rather
@@ -32,9 +32,9 @@ final class SpaceNavigator {
     // cadence; the event wake usually settles it in one).
     private let maxInFlightChecks = 3
     // Settle after a landed transition before the next post. Measured with
-    // --measure-swipe-floor on macOS 26: event-gated bursts never wedge the
-    // compositor at any gap, and 50ms is the fastest sustained cadence that
-    // stays predictable. Re-measure after macOS updates. A post after idle
+    // --measure-swipe-floor: event-gated bursts never wedge the compositor
+    // at any gap, and 50ms is the fastest sustained cadence that stays
+    // predictable. Re-measure after macOS updates. A post after idle
     // goes out immediately.
     private let postSettleGap: TimeInterval = 0.05
 
@@ -137,9 +137,6 @@ final class SpaceNavigator {
             cancel()
             arrival?()
             AppListProvider.harvestTitles()
-            if info.types[target] != 0 {
-                scheduleChromeHeal(space: target, right: targetIndex == 0)
-            }
             Diagnostics.verifyTransition(space: target)
             return
         }
@@ -166,22 +163,5 @@ final class SpaceNavigator {
         let work = DispatchWorkItem { [weak self] in self?.step() }
         stepWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + interval, execute: work)
-    }
-
-    // Every fullscreen arrival repaints its companion chrome (#63); see
-    // Spaces.postFullscreenChromeHeal for the mechanism. Display sleep
-    // purges the backings of windows on non-visible Spaces, the purge is
-    // invisible to every bookkeeping signal short of capturing pixels, and
-    // the heal itself is imperceptible - so it runs unconditionally rather
-    // than detecting the wedge. Deferred past the arrival because the Dock
-    // drops gestures fired right on a completed transition, and skipped
-    // when the user has already navigated on.
-    private func scheduleChromeHeal(space: UInt64, right: Bool) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            guard let self, self.target == nil,
-                  Spaces.activeDisplayInfo()?.current == space else { return }
-            Log.debug("navigator: fullscreen chrome heal on space \(space)")
-            Spaces.postFullscreenChromeHeal(right: right)
-        }
     }
 }
