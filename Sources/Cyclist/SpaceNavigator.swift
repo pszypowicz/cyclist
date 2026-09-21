@@ -52,6 +52,9 @@ final class SpaceNavigator {
     private var outstandingPost: UInt64?
     private var lastLanded: Date?
     private var inFlightChecks = 0
+    // Deferred heal requests coalesce: two arrivals in quick succession must
+    // not leave two ramps racing to open.
+    private var healWork: DispatchWorkItem?
 
     // The in-flight destination, so callers can step relative to where
     // navigation is already headed instead of the (stale) current Space.
@@ -80,6 +83,11 @@ final class SpaceNavigator {
         guard Spaces.activeDisplayInfo()?.order.contains(spaceID) == true else { return false }
         if let replaced = target, replaced != spaceID {
             Log.debug("navigator: replacing in-flight target \(replaced) with \(spaceID)")
+        }
+        // A swipe posted into the middle of a chrome-heal ramp is dropped by
+        // the Dock, which used to swallow whole bursts of quick swipes.
+        if Spaces.cancelChromeHeal() {
+            Log.debug("navigator: closed an in-flight chrome heal")
         }
         cancel()
         recency.navigationBegan()
@@ -137,15 +145,20 @@ final class SpaceNavigator {
             cancel()
             arrival?()
             AppListProvider.harvestTitles()
+            if info.types[target] != 0 {
+                scheduleChromeHeal(space: target, right: targetIndex == 0)
+            }
             Diagnostics.verifyTransition(space: target)
             return
         }
 
-        if let landed = lastLanded {
-            let sinceLanded = Date().timeIntervalSince(landed)
-            if sinceLanded < postSettleGap {
-                Log.debug("navigator hold: \(Int((postSettleGap - sinceLanded) * 1000))ms settle (target \(target))")
-                schedule(after: postSettleGap - sinceLanded)
+        // The settle gap runs from the last thing the Dock had to absorb:
+        // a landed transition, or a chrome-heal ramp closing.
+        if let settled = [lastLanded, Spaces.lastHealClose].compactMap({ $0 }).max() {
+            let sinceSettled = Date().timeIntervalSince(settled)
+            if sinceSettled < postSettleGap {
+                Log.debug("navigator hold: \(Int((postSettleGap - sinceSettled) * 1000))ms settle (target \(target))")
+                schedule(after: postSettleGap - sinceSettled)
                 return
             }
         }
@@ -163,5 +176,26 @@ final class SpaceNavigator {
         let work = DispatchWorkItem { [weak self] in self?.step() }
         stepWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + interval, execute: work)
+    }
+
+    // Every fullscreen arrival repaints its companion chrome (#63); see
+    // Spaces.postFullscreenChromeHeal for the mechanism. Display sleep
+    // purges the backings of windows on non-visible Spaces, the purge is
+    // invisible to every bookkeeping signal short of capturing pixels, and
+    // the heal itself is imperceptible, so it runs unconditionally rather
+    // than detecting the wedge. Deferred past the arrival because the Dock
+    // drops gestures fired right on a completed transition, and skipped
+    // when the user has already navigated on. A navigation that starts
+    // while the ramp is open closes it (see begin).
+    private func scheduleChromeHeal(space: UInt64, right: Bool) {
+        healWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.target == nil,
+                  Spaces.activeDisplayInfo()?.current == space else { return }
+            Log.debug("navigator: fullscreen chrome heal on space \(space)")
+            Spaces.postFullscreenChromeHeal(right: right)
+        }
+        healWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 }
