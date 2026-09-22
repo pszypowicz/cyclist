@@ -2,8 +2,6 @@
 
 A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots - just a list of app icons, names, and window titles you switch between with Cmd+Tab.
 
-> **Beta:** Cyclist is pre-1.0. Backward compatibility is not guaranteed until version 1.0.0 is reached.
-
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/demo-dark.svg">
