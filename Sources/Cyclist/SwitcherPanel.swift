@@ -51,6 +51,7 @@ struct SwitcherMetrics {
     var rowVerticalPadding: CGFloat { 5 * scale }
     var rowCornerRadius: CGFloat { 6 * scale }
     var rowSpacing: CGFloat { 2 * scale }
+    var groupGap: CGFloat { 9 * scale }
     var contentPadding: CGFloat { 8 * scale }
     var panelCornerRadius: CGFloat { 12 * scale }
     var width: CGFloat { 520 * scale }
@@ -68,6 +69,7 @@ struct SwitcherRow {
     let title: String
     let subtitle: String?
     let annotation: String?
+    let dividerAbove: Bool
 }
 
 final class SwitcherViewModel: ObservableObject {
@@ -97,30 +99,42 @@ struct SwitcherView: View {
                             .frame(maxWidth: .infinity, minHeight: metrics.rowHeight)
                     }
                     ForEach(Array(model.rows.enumerated()), id: \.offset) { index, row in
-                        HStack {
-                            if let icon = row.icon {
-                                Image(nsImage: icon)
-                                    .resizable()
-                                    .frame(width: metrics.iconSize, height: metrics.iconSize)
+                        // The divider shares its row's child of the outer
+                        // stack, so layout() counts groupGap once and no
+                        // extra rowSpacing.
+                        VStack(spacing: 0) {
+                            if row.dividerAbove {
+                                Rectangle()
+                                    .fill(Color(nsColor: .separatorColor))
+                                    .frame(height: 1)
+                                    .padding(.horizontal, metrics.rowHorizontalPadding)
+                                    .frame(height: metrics.groupGap)
                             }
-                            (Text(row.title)
-                                .font(.system(size: metrics.titleFontSize, weight: .semibold))
-                                + Text(row.subtitle.map { " - \($0)" } ?? "")
-                                .font(.system(size: metrics.titleFontSize)))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            Spacer(minLength: metrics.annotationSpacing)
-                            if let annotation = row.annotation {
-                                Text(annotation)
-                                    .font(.system(size: metrics.annotationFontSize))
-                                    .foregroundColor(index == model.selected ? .white.opacity(0.8) : .secondary)
+                            HStack {
+                                if let icon = row.icon {
+                                    Image(nsImage: icon)
+                                        .resizable()
+                                        .frame(width: metrics.iconSize, height: metrics.iconSize)
+                                }
+                                (Text(row.title)
+                                    .font(.system(size: metrics.titleFontSize, weight: .semibold))
+                                    + Text(row.subtitle.map { " - \($0)" } ?? "")
+                                    .font(.system(size: metrics.titleFontSize)))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                Spacer(minLength: metrics.annotationSpacing)
+                                if let annotation = row.annotation {
+                                    Text(annotation)
+                                        .font(.system(size: metrics.annotationFontSize))
+                                        .foregroundColor(index == model.selected ? .white.opacity(0.8) : .secondary)
+                                }
                             }
+                            .padding(.horizontal, metrics.rowHorizontalPadding)
+                            .padding(.vertical, metrics.rowVerticalPadding)
+                            .background(index == model.selected ? Color.accentColor : Color.clear)
+                            .foregroundColor(index == model.selected ? .white : .primary)
+                            .cornerRadius(metrics.rowCornerRadius)
                         }
-                        .padding(.horizontal, metrics.rowHorizontalPadding)
-                        .padding(.vertical, metrics.rowVerticalPadding)
-                        .background(index == model.selected ? Color.accentColor : Color.clear)
-                        .foregroundColor(index == model.selected ? .white : .primary)
-                        .cornerRadius(metrics.rowCornerRadius)
                         .id(index)
                     }
                 }
@@ -282,6 +296,7 @@ final class SwitcherPanel {
         // gets a panel the size of a one-row list instead of a bare sliver.
         let rows = model.rows.isEmpty && model.placeholder != nil ? 1 : CGFloat(model.rows.count)
         let content = rows * metrics.rowHeight + max(0, rows - 1) * metrics.rowSpacing
+            + CGFloat(model.rows.filter(\.dividerAbove).count) * metrics.groupGap
             + metrics.contentPadding * 2
         // A tall list scrolls inside the panel; never let the largest preset
         // grow the window past the screen it is centered on.

@@ -25,7 +25,7 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
   - include windows in **other Spaces** (including native fullscreen)
 - Two more apply to the **app switcher** only:
   - include **hidden** apps (Cmd+H)
-  - include running apps with **no windows** at all (off by default; selecting one behaves like clicking its Dock icon, so the app reopens a window)
+  - include running apps with **no windows** at all (off by default; they are listed last, below a divider, and selecting one behaves like clicking its Dock icon, so the app reopens a window)
 
 ## Keybindings
 

@@ -470,17 +470,21 @@ final class SwitcherController {
         )
     }
 
+    // The windowless group trails the list (see AppListProvider.snapshot);
+    // a divider opens it only when rows with windows sit above it.
     private func appRows(_ items: [ListEntry]) -> [SwitcherRow] {
-        items.map {
-            SwitcherRow(icon: $0.app.icon, title: $0.appName, subtitle: $0.windowTitle,
-                        annotation: annotation(for: $0))
+        let firstWindowless = items.firstIndex { $0.state == .noWindows }
+        return items.enumerated().map { index, entry in
+            SwitcherRow(icon: entry.app.icon, title: entry.appName, subtitle: entry.windowTitle,
+                        annotation: annotation(for: entry),
+                        dividerAbove: index > 0 && index == firstWindowless)
         }
     }
 
     private func windowRows(_ app: NSRunningApplication, _ items: [WindowItem]) -> [SwitcherRow] {
         items.map {
             SwitcherRow(icon: app.icon, title: $0.title, subtitle: nil,
-                        annotation: annotation(for: $0))
+                        annotation: annotation(for: $0), dividerAbove: false)
         }
     }
 
