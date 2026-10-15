@@ -211,6 +211,8 @@ struct SettingsView: View {
             Text("Windows shown")
         } footer: {
             Text("Applies to both the app switcher and the window switcher.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .disabled(!appSwitcher && !windowSwitcher)
     }
@@ -228,6 +230,8 @@ struct SettingsView: View {
             Text("App switcher list")
         } footer: {
             Text("Applies to the app switcher only.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .disabled(!appSwitcher)
     }
