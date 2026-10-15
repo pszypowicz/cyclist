@@ -69,7 +69,7 @@ In the app switcher, Quit and Close keep the list open: the affected rows leave 
 brew install --cask pszypowicz/tap/cyclist
 ```
 
-Release builds are signed with a Developer ID certificate and notarized, so Gatekeeper accepts them as-is; the cask launches the app after install.
+Release builds are signed with a Developer ID certificate and notarized, so Gatekeeper accepts them as-is. Homebrew does not start the app, so open Cyclist once after installing or upgrading.
 
 ### Direct download
 
