@@ -24,7 +24,8 @@ struct ListEntry {
 }
 
 // Builds the switcher list: every window of every regular app, in app MRU
-// order, filtered by the hidden/minimized/other-Spaces/no-windows settings.
+// order with windowless apps last, filtered by the
+// hidden/minimized/other-Spaces/no-windows settings.
 // Runs on SnapshotQueue as a pure function of SnapshotInputs; per-app AX
 // sweeps fan out concurrently (different apps are independent mach
 // connections), so a hung app costs its own timeout, not a serialized sum.
@@ -202,7 +203,20 @@ enum AppListProvider {
         flushTitleCache()
         Log.debug("snapshot: apps=\(apps.count) rows=\(entries.count)"
             + " sweep=\(sweepMs)ms total=\(Int(Date().timeIntervalSince(started) * 1000))ms")
-        return entries
+        // A windowless app is a relaunch target, not a window to switch
+        // to, so those rows trail every app that has a window. Each group
+        // keeps its MRU order.
+        return entries.filter { $0.state != .noWindows } + entries.filter { $0.state == .noWindows }
+    }
+
+    // The sweep's windowless rule for a single app: no window AX can list
+    // and none parked in a non-visible Space. Blocking AX, so it runs on
+    // SnapshotQueue like the sweep.
+    static func isWindowless(pid: pid_t) -> Bool {
+        guard AX.qualifiedWindows(pid: pid).isEmpty else { return false }
+        let windowIDs = Set(CGWindows.real([.optionAll, .excludeDesktopElements])
+            .filter { $0.pid == pid }.map(\.id))
+        return !Spaces.windowsByNonVisibleSpace().values.contains { !$0.isDisjoint(with: windowIDs) }
     }
 
     private static func sweep(_ snapshotApp: SnapshotApp, inputs: SnapshotInputs,

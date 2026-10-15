@@ -90,7 +90,7 @@ final class WindowFocusTracker {
                   CGWindows.realOwner(of: windowID)?.isReal == true else { return }
             self.noteFocus(windowID: windowID, source: "created")
         }
-        events.onDestroyed = { [weak self] windowID in
+        events.onDestroyed.append { [weak self] windowID in
             self?.sequence.removeValue(forKey: windowID)
             AppListProvider.evictTitle(windowID: windowID)
             WindowElements.evict(windowID: windowID)

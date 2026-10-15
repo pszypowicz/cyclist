@@ -211,6 +211,8 @@ struct SettingsView: View {
             Text("Windows shown")
         } footer: {
             Text("Applies to both the app switcher and the window switcher.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .disabled(!appSwitcher && !windowSwitcher)
     }
@@ -221,13 +223,15 @@ struct SettingsView: View {
             Toggle(isOn: $showAppsWithNoWindow) {
                 HStack(spacing: 4) {
                     Text("Show apps with no open window")
-                    InfoDot("Lists running apps with no open window. Selecting one behaves like clicking its Dock icon, so the app reopens a window.")
+                    InfoDot("Lists running apps with no open window at the end of the list, below a divider. Selecting one behaves like clicking its Dock icon, so the app reopens a window.")
                 }
             }
         } header: {
             Text("App switcher list")
         } footer: {
             Text("Applies to the app switcher only.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .disabled(!appSwitcher)
     }

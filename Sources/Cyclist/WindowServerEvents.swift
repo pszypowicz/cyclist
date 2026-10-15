@@ -78,7 +78,9 @@ final class WindowServerEvents {
     // wake-up hints and re-read real state, never as arrival truth.
     var onFocused: ((Int) -> Void)?
     var onCreated: ((Int) -> Void)?
-    var onDestroyed: ((Int) -> Void)?
+    // A list, unlike its siblings: recency bookkeeping and the switcher's
+    // live session both react to a window going away.
+    var onDestroyed: [(Int) -> Void] = []
     var onSpaceChanged: ((UInt64) -> Void)?
 
     private var optedIn: Set<UInt32> = []
@@ -115,7 +117,7 @@ final class WindowServerEvents {
             if optedIn.remove(windowID) != nil {
                 schedulePushOptIns()
             }
-            onDestroyed?(Int(windowID))
+            onDestroyed.forEach { $0(Int(windowID)) }
         case Self.spaceCurrentChanged, Self.activeSpaceChanged:
             onSpaceChanged?(spaceID)
         default:

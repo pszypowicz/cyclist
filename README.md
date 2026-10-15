@@ -25,7 +25,7 @@ A keyboard-driven app switcher for macOS. No thumbnails, no window screenshots -
   - include windows in **other Spaces** (including native fullscreen)
 - Two more apply to the **app switcher** only:
   - include **hidden** apps (Cmd+H)
-  - include running apps with **no windows** at all (off by default; selecting one behaves like clicking its Dock icon, so the app reopens a window)
+  - include running apps with **no windows** at all (off by default; they are listed last, below a divider, and selecting one behaves like clicking its Dock icon, so the app reopens a window)
 
 ## Keybindings
 
@@ -53,7 +53,7 @@ While the switcher is open (Cmd held):
 | Esc             | Cancel                          |
 | Release Cmd     | Switch to the selected item     |
 
-In the app switcher, Quit and Close keep the list open: the affected rows leave and the selection moves to a neighbor. In the window switcher, quitting the app ends the session (every row belonged to it).
+In the app switcher, Quit and Close keep the list open: the affected rows leave and the selection moves to a neighbor. With apps that have no windows shown, closing an app's last window moves the app below the divider once the window is actually gone. In the window switcher, quitting the app ends the session (every row belonged to it).
 
 ## Requirements
 
