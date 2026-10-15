@@ -209,6 +209,16 @@ enum AppListProvider {
         return entries.filter { $0.state != .noWindows } + entries.filter { $0.state == .noWindows }
     }
 
+    // The sweep's windowless rule for a single app: no window AX can list
+    // and none parked in a non-visible Space. Blocking AX, so it runs on
+    // SnapshotQueue like the sweep.
+    static func isWindowless(pid: pid_t) -> Bool {
+        guard AX.qualifiedWindows(pid: pid).isEmpty else { return false }
+        let windowIDs = Set(CGWindows.real([.optionAll, .excludeDesktopElements])
+            .filter { $0.pid == pid }.map(\.id))
+        return !Spaces.windowsByNonVisibleSpace().values.contains { !$0.isDisjoint(with: windowIDs) }
+    }
+
     private static func sweep(_ snapshotApp: SnapshotApp, inputs: SnapshotInputs,
                               cgWindows: [pid_t: [Int]], cgTitles: [Int: String],
                               otherSpaceWindows: [(key: UInt64, value: Set<Int>)],

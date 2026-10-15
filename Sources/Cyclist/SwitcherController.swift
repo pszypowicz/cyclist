@@ -57,6 +57,17 @@ final class SwitcherController {
     // fail up to its timeout later) once a newer activation happened;
     // native arrivals are covered by navigator.cancel() instead.
     private var activationGeneration = 0
+    // Windows closed from a live app session, keyed by window id until the
+    // destroy event confirms the close. Every close is tracked, not only
+    // the one that took the app's last row: closes can confirm out of
+    // order (a save sheet holds one window while a later close lands), and
+    // only the final destroy finds the app windowless. Reset per app
+    // session.
+    private var awaitingDestroy: [Int: (app: NSRunningApplication, appName: String, generation: Int)] = [:]
+    // How long a confirmed close waits before the windowless check, so an
+    // app that quits with its last window is gone first (Dictionary exits
+    // ~60ms after its window closes).
+    private let windowlessGrace: TimeInterval = 0.3
 
     // Fired when the key tap dies (e.g. Accessibility revoked at runtime);
     // the owner polls for the grant and calls start() to rebuild.
@@ -109,6 +120,9 @@ final class SwitcherController {
         }
         tap.onInvalidated = { [weak self] in
             self?.onTapInvalidated?()
+        }
+        events.onDestroyed.append { [weak self] windowID in
+            self?.windowDestroyed(windowID)
         }
     }
 
@@ -280,6 +294,7 @@ final class SwitcherController {
             session = .pendingApps(presses: [backward])
             snapshotGeneration += 1
             let generation = snapshotGeneration
+            awaitingDestroy.removeAll()
             // Freshen the workspace cache for commit time and the next
             // session; the sweep reads whatever is captured at its start.
             aerospace.refresh()
@@ -601,6 +616,9 @@ final class SwitcherController {
             AX.close(element)
             var remaining = items
             remaining.remove(at: index)
+            if Settings.showAppsWithNoWindow, let windowID = entry.windowID {
+                awaitingDestroy[windowID] = (entry.app, entry.appName, snapshotGeneration)
+            }
             applyAppsSession(remaining, selectedNear: index)
         case .windows(let app, let items, let index):
             let item = items[index]
@@ -622,6 +640,53 @@ final class SwitcherController {
         case .pendingApps, .pendingWindows, .empty, nil:
             break
         }
+    }
+
+    // A close from the list is only a request: a save sheet can keep the
+    // window, and some apps quit with their last window. So the app's
+    // windowless row joins the open list only after the destroy event,
+    // the grace delay, and the snapshot's own windowless rule agree.
+    private func windowDestroyed(_ windowID: Int) {
+        guard let closed = awaitingDestroy.removeValue(forKey: windowID) else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + windowlessGrace) { [weak self] in
+            guard self?.isLiveAppsSession(closed.generation) == true, !closed.app.isTerminated else { return }
+            SnapshotQueue.shared.async { [weak self] in
+                let windowless = AppListProvider.isWindowless(pid: closed.app.processIdentifier)
+                DispatchQueue.main.async { [weak self] in
+                    if windowless {
+                        self?.insertWindowless(app: closed.app, appName: closed.appName,
+                                               generation: closed.generation)
+                    }
+                }
+            }
+        }
+    }
+
+    private func isLiveAppsSession(_ generation: Int) -> Bool {
+        guard generation == snapshotGeneration, case .apps = session else { return false }
+        return true
+    }
+
+    // Lands where the next snapshot would put the row: windowless rows
+    // trail the list in app MRU order. The selection stays on its row.
+    private func insertWindowless(app: NSRunningApplication, appName: String, generation: Int) {
+        guard isLiveAppsSession(generation), !app.isTerminated,
+              case .apps(var items, var index) = session else { return }
+        let pid = app.processIdentifier
+        guard !items.contains(where: { $0.app.processIdentifier == pid }) else { return }
+        let position = mru.position(of: pid)
+        let at = items.firstIndex {
+            $0.state == .noWindows && mru.position(of: $0.app.processIdentifier) > position
+        } ?? items.count
+        items.insert(ListEntry(app: app, appName: appName, windowTitle: nil, state: .noWindows,
+                               axWindow: nil, spaceID: nil, windowID: nil, aerospaceWorkspace: nil),
+                     at: at)
+        if at <= index {
+            index += 1
+        }
+        Log.write("close: \(appName) is now windowless, row \(at) of \(items.count)")
+        session = .apps(items, index: index)
+        panel.setRows(appRows(items), selected: index)
     }
 
     private func applyAppsSession(_ items: [ListEntry], selectedNear index: Int) {
