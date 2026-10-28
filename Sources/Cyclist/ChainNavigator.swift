@@ -161,13 +161,23 @@ final class ChainNavigator {
     // the host desktop cannot be resolved (several regular desktops seen from
     // off-host - AeroSpace does not say which one it occupies). Runs on the
     // AeroSpace event callback (main queue), never the key tap.
+    //
+    // AeroSpace also switches workspace when macOS focuses one of its windows,
+    // which is what arriving on a fullscreen Space does. The current Space
+    // already showing one of the workspace's windows means the user is
+    // looking at it; following would bounce a partly fullscreen workspace
+    // straight back to its host desktop.
     func followWorkspaceChange(to name: String) {
         guard aerospace.isActive, let display = Spaces.activeDisplayInfo() else { return }
+        let windows = Set(aerospace.windowIDs(inWorkspace: name))
+        guard Spaces.windowIDs(inSpace: display.current).isDisjoint(with: windows) else {
+            Log.debug("chain: follow \(name); space \(display.current) already shows it")
+            return
+        }
         guard let host = chooseHost(display) else {
             Log.write("chain: follow \(name); no host desktop")
             return
         }
-        let windows = Set(aerospace.windowIDs(inWorkspace: name))
         // The workspace shows on the host desktop as long as any of its
         // windows lives there - parked windows count, they sit off-screen on
         // the same native Space. Only when every window is native-fullscreen
